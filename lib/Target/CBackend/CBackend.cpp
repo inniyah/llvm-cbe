@@ -1655,6 +1655,11 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
 }
 
 std::string CWriter::GetValueName(Value *Operand) {
+  //SUSAN: where the vairable names are printed
+  Instruction *opInst = dyn_cast<Instruction>(Operand);
+  if(opInst && IR2VarName.find(opInst) != IR2VarName.end()){
+    return IR2VarName[opInst];
+  }
 
   // Resolve potential alias.
   if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Operand)) {
@@ -3644,6 +3649,22 @@ static inline bool isFPIntBitCast(Instruction &I) {
          (DstTy->isFloatingPointTy() && SrcTy->isIntegerTy());
 }
 
+bool CWriter::isNotDuplicatedDeclaration(Instruction *I) {
+  // If there is no mapping between IR and variable, then there's no duplication
+  if(IR2VarName.find(I) == IR2VarName.end()) return true;
+
+  // If two registers point to the same local variable, in the source code only one variable
+  // needs to be declared
+  for(auto &var : vars2declare){
+    if(var == IR2VarName[I]){
+      vars2declare.erase(var);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool CWriter::canDeclareLocalLate(Instruction &I) {
   if (!DeclareLocalsLate) {
     return false;
@@ -3660,6 +3681,7 @@ bool CWriter::canDeclareLocalLate(Instruction &I) {
 }
 
 void CWriter::printFunction(Function &F) {
+
   /// isStructReturn - Should this function actually return a struct by-value?
   bool isStructReturn = F.hasStructRetAttr();
 
@@ -3728,6 +3750,30 @@ void CWriter::printFunction(Function &F) {
 
   bool PrintedVar = false;
 
+  //SUSAN: build a variable - IR table
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    if(CallInst* CI = dyn_cast<CallInst>(&*I)){
+      if(Function *F = CI->getCalledFunction()){
+        if (F->getIntrinsicID() == Intrinsic::dbg_value){
+            Metadata *valMeta = cast<MetadataAsValue>(CI->getOperand(0))->getMetadata();
+            Metadata *varMeta = cast<MetadataAsValue>(CI->getOperand(1))->getMetadata();
+            DILocalVariable *var = dyn_cast<DILocalVariable>(varMeta);
+            assert(var && "SUSAN: 2nd argument of llvm.dbg.value is not DILocalVariable?\n");
+            StringRef varName = var->getName();
+            if(isa<ValueAsMetadata>(valMeta)){
+              Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
+              if(Instruction *valInst = dyn_cast<Instruction>(valV)){
+               IR2VarName[valInst] = varName;
+               vars2declare.insert(varName);
+              }
+            }
+            else assert(0 && "SUSAN: 1st argument is not a Value?\n");
+        }
+      }
+    }
+  }
+
+
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
@@ -3746,7 +3792,8 @@ void CWriter::printFunction(Function &F) {
       Out << ";    /* Address-exposed local */\n";
       PrintedVar = true;
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
-      if (!canDeclareLocalLate(*I)) {
+      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I)) {
+        errs() << "SUSAN: canDeclareLocalLate :" << *I << "\n";
         Out << "  ";
         printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
         Out << ";\n";
@@ -3970,6 +4017,12 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
                                          BasicBlock *Successor,
                                          unsigned Indent) {
   for (BasicBlock::iterator I = Successor->begin(); isa<PHINode>(I); ++I) {
+    //SUSAN: found phi that has original variable site;
+    Instruction *inst = &*I;
+    if(IR2VarName.find(inst) != IR2VarName.end()){
+      errs() << "SUSAN: found phi with known variable name: "<< *inst << "\n";
+    }
+
     PHINode *PN = cast<PHINode>(I);
     // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
