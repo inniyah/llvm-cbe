@@ -3649,15 +3649,16 @@ static inline bool isFPIntBitCast(Instruction &I) {
          (DstTy->isFloatingPointTy() && SrcTy->isIntegerTy());
 }
 
-bool CWriter::isNotDuplicatedDeclaration(Instruction *I) {
+bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
   // If there is no mapping between IR and variable, then there's no duplication
   if(IR2VarName.find(I) == IR2VarName.end()) return true;
 
+  auto declarations = isPhi? &phis2declare : &vars2declare;
   // If two registers point to the same local variable, in the source code only one variable
   // needs to be declared
-  for(auto &var : vars2declare){
+  for(auto &var : *declarations){
     if(var == IR2VarName[I]){
-      vars2declare.erase(var);
+      declarations->erase(var);
       return true;
     }
   }
@@ -3765,6 +3766,9 @@ void CWriter::printFunction(Function &F) {
               if(Instruction *valInst = dyn_cast<Instruction>(valV)){
                IR2VarName[valInst] = varName;
                vars2declare.insert(varName);
+               if(isa<PHINode>(valInst)){
+                 phis2declare.insert(varName);
+               }
               }
             }
             else assert(0 && "SUSAN: 1st argument is not a Value?\n");
@@ -3792,14 +3796,13 @@ void CWriter::printFunction(Function &F) {
       Out << ";    /* Address-exposed local */\n";
       PrintedVar = true;
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
-      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I)) {
-        errs() << "SUSAN: canDeclareLocalLate :" << *I << "\n";
+      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
         Out << "  ";
         printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
         Out << ";\n";
       }
 
-      if (isa<PHINode>(*I)) { // Print out PHI node temporaries as well...
+      if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
         Out << "  ";
         printTypeName(Out, I->getType(), false)
             << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
@@ -4017,12 +4020,6 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
                                          BasicBlock *Successor,
                                          unsigned Indent) {
   for (BasicBlock::iterator I = Successor->begin(); isa<PHINode>(I); ++I) {
-    //SUSAN: found phi that has original variable site;
-    Instruction *inst = &*I;
-    if(IR2VarName.find(inst) != IR2VarName.end()){
-      errs() << "SUSAN: found phi with known variable name: "<< *inst << "\n";
-    }
-
     PHINode *PN = cast<PHINode>(I);
     // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);

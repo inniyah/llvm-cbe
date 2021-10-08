@@ -55,7 +55,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
   //SUSAN: tables for variable preservation
   std::map<Instruction*, StringRef>IR2VarName;
-  std::set<StringRef>vars2declare;
+  std::set<StringRef>vars2declare, phis2declare;
 
   std::string _Out;
   std::string _OutHeaders;
@@ -346,7 +346,7 @@ private:
 
   bool isGotoCodeNecessary(BasicBlock *From, BasicBlock *To);
   bool canDeclareLocalLate(Instruction &I);
-  bool isNotDuplicatedDeclaration(Instruction *I);
+  bool isNotDuplicatedDeclaration(Instruction *I, bool isPhi);
   void printPHICopiesForSuccessor(BasicBlock *CurBlock, BasicBlock *Successor,
                                   unsigned Indent);
   void printBranchToBlock(BasicBlock *CurBlock, BasicBlock *SuccBlock,
