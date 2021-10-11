@@ -1657,9 +1657,13 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
 std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: where the vairable names are printed
   Instruction *opInst = dyn_cast<Instruction>(Operand);
-  if(opInst && IR2VarName.find(opInst) != IR2VarName.end()){
-    return IR2VarName[opInst];
-  }
+  for (auto const& [var, inst] : Var2IR)
+    if(inst == opInst) return var;
+
+
+//  if(opInst && IR2VarName.find(opInst) != IR2VarName.end()){
+//    return IR2VarName[opInst];
+//  }
 
   // Resolve potential alias.
   if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Operand)) {
@@ -3651,19 +3655,20 @@ static inline bool isFPIntBitCast(Instruction &I) {
 
 bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
   // If there is no mapping between IR and variable, then there's no duplication
-  if(IR2VarName.find(I) == IR2VarName.end()) return true;
-
-  auto declarations = isPhi? &phis2declare : &vars2declare;
-  // If two registers point to the same local variable, in the source code only one variable
-  // needs to be declared
-  for(auto &var : *declarations){
-    if(var == IR2VarName[I]){
-      declarations->erase(var);
-      return true;
+  //if(IR2VarName.find(I) == IR2VarName.end()) return true;
+  for (auto const& [var, inst] : Var2IR){
+    if(I == inst){
+      auto Vars2Emit = isPhi? &phiVars : &allVars;
+      for(auto &var2emit : *Vars2Emit){
+        if(var2emit == var){
+          Vars2Emit->erase(var2emit);
+          return true;
+        }
+      }
+      return false;
     }
   }
-
-  return false;
+  return true;
 }
 
 bool CWriter::canDeclareLocalLate(Instruction &I) {
@@ -3761,14 +3766,17 @@ void CWriter::printFunction(Function &F) {
             DILocalVariable *var = dyn_cast<DILocalVariable>(varMeta);
             assert(var && "SUSAN: 2nd argument of llvm.dbg.value is not DILocalVariable?\n");
             StringRef varName = var->getName();
-            if(isa<ValueAsMetadata>(valMeta)){
+            if (isa<ValueAsMetadata>(valMeta)){
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
-              if(Instruction *valInst = dyn_cast<Instruction>(valV)){
-               IR2VarName[valInst] = varName;
-               vars2declare.insert(varName);
-               if(isa<PHINode>(valInst)){
-                 phis2declare.insert(varName);
-               }
+              if (Instruction *valInst = dyn_cast<Instruction>(valV)){
+                //IR2VarName[valInst] = varName;
+                //for (auto const& [var, inst] : Var2IR)
+                  //assert(!(var != varName && inst == valInst) && "IR mapped to >1 vars!\n");
+                Var2IR[varName] = valInst;
+                allVars.insert(varName);
+                if (isa<PHINode>(valInst)){
+                  phiVars.insert(varName);
+                }
               }
             }
             else assert(0 && "SUSAN: 1st argument is not a Value?\n");

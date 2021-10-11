@@ -54,8 +54,9 @@ public:
 class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
   //SUSAN: tables for variable preservation
-  std::map<Instruction*, StringRef>IR2VarName;
-  std::set<StringRef>vars2declare, phis2declare;
+  //std::map<Instruction*, StringRef>IR2VarName;
+  std::map<StringRef,Instruction*>Var2IR;
+  std::set<StringRef>allVars, phiVars;
 
   std::string _Out;
   std::string _OutHeaders;
