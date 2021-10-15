@@ -4095,6 +4095,11 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
+
+  if(I.hasMetadata("cf.info")){
+    errs() << "SUSAN: getting the if.info from branch" << I << "\n";
+  }
+
   CurInstr = &I;
 
   if (I.isConditional()) {
