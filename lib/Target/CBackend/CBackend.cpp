@@ -31,6 +31,9 @@
 
 #include <iostream>
 
+// SUSAN: added libs
+#include <queue>
+
 // Jackson Korba 9/29/14
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE ""
@@ -2604,9 +2607,49 @@ void CWriter::generateHeader(Module &M) {
   // Output the global variable definitions and contents...
   if (!M.global_empty()) {
     Out << "\n\n/* Global Variable Definitions and Initialization */\n";
+
+    // SUSAN: globals can be out of order in llvm IR, for example, the following is legal:
+    // @tree.sdown = internal global i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i32 0, i32 0), align 8, !dbg !0
+    // @.str = private unnamed_addr constant [4 x i8] c"  |\00", align 1
+    // Therefore code can't be produced in llvm order
+    //
+    //for (Module::global_iterator I = M.global_begin(), E = M.global_end();
+    //     I != E; ++I) {
+    //  GlobalVariable* inst = &*I;
+    //  errs() << "SUSAN: global variable: " << *inst << "\n";
+    //  declareOneGlobalVariable(&*I);
+    //}
+    //
+    std::set<GlobalVariable*> declared;
+    std::queue<GlobalVariable*> workingList;
     for (Module::global_iterator I = M.global_begin(), E = M.global_end();
          I != E; ++I) {
-      declareOneGlobalVariable(&*I);
+      GlobalVariable* glob = &*I;
+      workingList.push(glob);
+    }
+
+    while(!workingList.empty()){
+      bool isReady2Declare = true;
+      GlobalVariable *currGlob = workingList.front();
+      workingList.pop();
+      Constant *initializer = currGlob->getInitializer();
+
+      if(ConstantExpr *initializerExpr = dyn_cast<ConstantExpr>(initializer)){
+        if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(initializerExpr) ){
+          Value *v = initializerOp->getPointerOperand();
+          if( GlobalVariable *useGlob = dyn_cast<GlobalVariable>(v) ){
+             if (declared.find(useGlob) == declared.end()){
+               workingList.push(currGlob);
+               isReady2Declare = false;
+             }
+          }
+        }
+      }
+
+      if(isReady2Declare){
+          declareOneGlobalVariable(currGlob);
+          declared.insert(currGlob);
+      }
     }
   }
 
