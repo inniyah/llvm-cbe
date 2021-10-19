@@ -4114,22 +4114,21 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
     std::set<BasicBlock*> visited;
     std::queue<BasicBlock*> toVisit;
+    visited.insert(trueStartBB);
     toVisit.push(trueStartBB);
 
     while(!toVisit.empty()){
       BasicBlock *currBB = toVisit.front();
       toVisit.pop();
       errs() << "bb from if-true branch:" << *currBB << "\n";
-
-      for (auto succ = succ_begin(trueStartBB);
-           succ != succ_end(trueStartBB); ++succ){
+      for (auto succ = succ_begin(currBB);
+           succ != succ_end(currBB); ++succ){
           BasicBlock *succBB = *succ;
           if(visited.find(succBB)==visited.end()){
             visited.insert(succBB);
             toVisit.push(succBB);
           }
       }
-
     }
 
 
