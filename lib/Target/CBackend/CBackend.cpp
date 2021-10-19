@@ -202,12 +202,15 @@ bool CWriter::isInlineAsm(Instruction &I) const {
 }
 
 bool CWriter::runOnFunction(Function &F) {
+
   // Do not codegen any 'available_externally' functions at all, they have
   // definitions outside the translation unit.
   if (F.hasAvailableExternallyLinkage())
     return false;
 
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  // SUSAN: add post dominator
+  PostDominatorTree * PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
 
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
@@ -4096,8 +4099,40 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
 
+  // SUSAN: emit if statement
   if(I.hasMetadata("cf.info")){
     errs() << "SUSAN: getting the if.info from branch" << I << "\n";
+
+    assert(I.isConditional() && "marked C-if isn't a conditional?\n");
+    // emit conditional
+    Out << "  if (";
+    writeOperand(I.getCondition(), ContextCasted);
+    Out << ") {\n";
+
+    BasicBlock *trueStartBB = I.getSuccessor(0);
+    BasicBlock *falseStartBB = I.getSuccessor(1);
+
+    std::set<BasicBlock*> visited;
+    std::queue<BasicBlock*> toVisit;
+    toVisit.push(trueStartBB);
+
+    while(!toVisit.empty()){
+      BasicBlock *currBB = toVisit.front();
+      toVisit.pop();
+      errs() << "bb from if-true branch:" << *currBB << "\n";
+
+      for (auto succ = succ_begin(trueStartBB);
+           succ != succ_end(trueStartBB); ++succ){
+          BasicBlock *succBB = *succ;
+          if(visited.find(succBB)==visited.end()){
+            visited.insert(succBB);
+            toVisit.push(succBB);
+          }
+      }
+
+    }
+
+
   }
 
   CurInstr = &I;
@@ -5793,3 +5828,4 @@ LLVM_ATTRIBUTE_NORETURN void CWriter::errorWithMessage(const char *message) {
 }
 
 } // namespace llvm_cbe
+

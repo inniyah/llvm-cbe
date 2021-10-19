@@ -40,6 +40,9 @@
 
 #include "IDMap.h"
 
+// SUSAN ADDED LIBS
+#include "llvm/Analysis/PostDominators.h"
+
 namespace llvm_cbe {
 
 using namespace llvm;
@@ -53,8 +56,7 @@ public:
 /// module to a C translation unit.
 class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
-  //SUSAN: tables for variable preservation
-  //std::map<Instruction*, StringRef>IR2VarName;
+  // SUSAN: tables for variable preservation
   std::map<StringRef,Instruction*>Var2IR;
   std::set<StringRef>allVars, phiVars;
 
@@ -180,6 +182,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<LoopInfoWrapperPass>();
+    AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.setPreservesCFG();
   }
 
