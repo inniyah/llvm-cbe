@@ -210,7 +210,7 @@ bool CWriter::runOnFunction(Function &F) {
 
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   // SUSAN: add post dominator
-  PostDominatorTree * PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
 
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
@@ -221,6 +221,7 @@ bool CWriter::runOnFunction(Function &F) {
   printFunction(F);
 
   LI = nullptr;
+  PDT = nullptr;
 
   return Modified;
 }
@@ -3885,6 +3886,7 @@ void CWriter::printFunction(Function &F) {
         printLoop(L);
     } else {
       printBasicBlock(&*BB);
+      printedBBs.insert(&*BB);
     }
   }
 
@@ -3897,8 +3899,10 @@ void CWriter::printLoop(Loop *L) {
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
-    if (BBLoop == L)
+    if (BBLoop == L){
       printBasicBlock(BB);
+      printedBBs.insert(BB);
+    }
     else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
       printLoop(BBLoop);
   }
@@ -3907,6 +3911,10 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB) {
+  if(printedBBs.find(BB) != printedBBs.end()){
+    errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
+    return;
+  }
   // Don't print the label for the basic block if there are no uses, or if
   // the only terminator use is the predecessor basic block's terminator.
   // We have to scan the use list because PHI nodes use basic blocks too but
@@ -4095,6 +4103,35 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
   }
 }
 
+void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
+    errs() << "========= Start emitting a branch ========"  << "\n";
+    std::set<BasicBlock*> visited;
+    std::queue<BasicBlock*> toVisit;
+    visited.insert(start);
+    toVisit.push(start);
+
+    while(!toVisit.empty()){
+      BasicBlock *currBB = toVisit.front();
+      if(PDT->dominates(currBB, brBlock)){
+        errs() << "found post dominator" << *currBB << "\n";
+        break;
+      }
+
+      // print the basic block
+      printBasicBlock(currBB);
+      printedBBs.insert(currBB);
+
+      toVisit.pop();
+      for (auto succ = succ_begin(currBB);
+           succ != succ_end(currBB); ++succ){
+          BasicBlock *succBB = *succ;
+          if(visited.find(succBB)==visited.end()){
+            visited.insert(succBB);
+            toVisit.push(succBB);
+          }
+      }
+    }
+}
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
@@ -4105,33 +4142,22 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
     assert(I.isConditional() && "marked C-if isn't a conditional?\n");
     // emit conditional
-    Out << "  if (";
-    writeOperand(I.getCondition(), ContextCasted);
-    Out << ") {\n";
 
     BasicBlock *trueStartBB = I.getSuccessor(0);
     BasicBlock *falseStartBB = I.getSuccessor(1);
 
-    std::set<BasicBlock*> visited;
-    std::queue<BasicBlock*> toVisit;
-    visited.insert(trueStartBB);
-    toVisit.push(trueStartBB);
+    Out << "  if (";
+    writeOperand(I.getCondition(), ContextCasted);
+    Out << ") {\n";
 
-    while(!toVisit.empty()){
-      BasicBlock *currBB = toVisit.front();
-      toVisit.pop();
-      errs() << "bb from if-true branch:" << *currBB << "\n";
-      for (auto succ = succ_begin(currBB);
-           succ != succ_end(currBB); ++succ){
-          BasicBlock *succBB = *succ;
-          if(visited.find(succBB)==visited.end()){
-            visited.insert(succBB);
-            toVisit.push(succBB);
-          }
-      }
-    }
+    // Construct each branch
+    emitIfBlock(trueStartBB, I.getParent());
+    Out << "  } else {\n";
+    emitIfBlock(falseStartBB, I.getParent());
 
+    Out << "}\n";
 
+    return;
   }
 
   CurInstr = &I;

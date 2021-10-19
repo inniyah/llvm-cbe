@@ -59,6 +59,10 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   // SUSAN: tables for variable preservation
   std::map<StringRef,Instruction*>Var2IR;
   std::set<StringRef>allVars, phiVars;
+  std::set<BasicBlock*>printedBBs;
+
+  // SUSAN: PDT
+  PostDominatorTree *PDT = nullptr;
 
   std::string _Out;
   std::string _OutHeaders;
@@ -249,6 +253,9 @@ private:
     // Static context means that it is being used in as a static initializer
     // (also implies ContextCasted)
   };
+
+  // SUSAN: added functions
+  void emitIfBlock(BasicBlock* start, BasicBlock *brBlock);
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
