@@ -232,13 +232,48 @@ int main(int argc, char **argv) {
 
   // Initialize codegen and IR passes used by llc so that the -print-after,
   // -print-before, and -stop-after options work.
-  PassRegistry *Registry = PassRegistry::getPassRegistry();
-  initializeCore(*Registry);
-  initializeCodeGen(*Registry);
-  initializeLoopStrengthReducePass(*Registry);
-  initializeLowerIntrinsicsPass(*Registry);
-  initializeUnreachableBlockElimLegacyPassPass(*Registry);
-
+  PassRegistry &Registry = *PassRegistry::getPassRegistry();
+  initializeCodeGen(Registry);
+  initializeLoopStrengthReducePass(Registry);
+  initializeLowerIntrinsicsPass(Registry);
+  initializeCore(Registry);
+  //initializeCoroutines(Registry);
+  initializeScalarOpts(Registry);
+  //initializeObjCARCOpts(Registry);
+  //initializeVectorization(Registry);
+  //initializeIPO(Registry);
+  initializeAnalysis(Registry);
+  initializeTransformUtils(Registry);
+  initializeInstCombine(Registry);
+  initializeAggressiveInstCombine(Registry);
+  //initializeInstrumentation(Registry);
+  initializeTarget(Registry);
+  // For codegen passes, only passes that do IR to IR transformation are
+  // supported.
+  initializeExpandMemCmpPassPass(Registry);
+  //initializeScalarizeMaskedMemIntrinLegacyPassPass(Registry);
+  initializeCodeGenPreparePass(Registry);
+  initializeAtomicExpandPass(Registry);
+  initializeRewriteSymbolsLegacyPassPass(Registry);
+  initializeWinEHPreparePass(Registry);
+  //initializeDwarfEHPrepareLegacyPassPass(Registry);
+  initializeSafeStackLegacyPassPass(Registry);
+  initializeSjLjEHPreparePass(Registry);
+  initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
+  initializeGlobalMergePass(Registry);
+  initializeIndirectBrExpandPassPass(Registry);
+  initializeInterleavedLoadCombinePass(Registry);
+  initializeInterleavedAccessPass(Registry);
+  initializeEntryExitInstrumenterPass(Registry);
+  initializePostInlineEntryExitInstrumenterPass(Registry);
+  initializeUnreachableBlockElimLegacyPassPass(Registry);
+  initializeExpandReductionsPass(Registry);
+  //initializeExpandVectorPredicationPass(Registry);
+  initializeWasmEHPreparePass(Registry);
+  initializeWriteBitcodePassPass(Registry);
+  initializeHardwareLoopsPass(Registry);
+  initializeTypePromotionPass(Registry);
+  //initializeReplaceWithVeclibLegacyPass(Registry);
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 

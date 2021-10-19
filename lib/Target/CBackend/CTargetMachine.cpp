@@ -53,8 +53,6 @@ bool CTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
   // Lower atomic operations to libcalls
   PM.add(createAtomicExpandPass());
 
-  // SUSAN: add PDT pass
-  PM.add(createPostDomTree());
   PM.add(new llvm_cbe::CWriter(Out));
   return false;
 }
