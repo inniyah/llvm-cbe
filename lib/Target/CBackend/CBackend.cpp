@@ -4151,8 +4151,10 @@ void CWriter::visitBranchInst(BranchInst &I) {
     Out << ") {\n";
 
     // Construct each branch
+    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
     emitIfBlock(trueStartBB, I.getParent());
     Out << "  } else {\n";
+    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
     emitIfBlock(falseStartBB, I.getParent());
 
     Out << "}\n";
