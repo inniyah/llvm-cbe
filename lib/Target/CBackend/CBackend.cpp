@@ -4104,7 +4104,8 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
 }
 
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
-    errs() << "========= Start emitting a branch ========"  << "\n";
+    errs() << "========= Start emitting a branch  ========\n";
+    errs() << *start << "\n";
     std::set<BasicBlock*> visited;
     std::queue<BasicBlock*> toVisit;
     visited.insert(start);
@@ -4118,10 +4119,16 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
       }
 
       // print the basic block
+      if(printedBBs.find(currBB) != printedBBs.end()){
+        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+        toVisit.pop();
+        continue;
+      }
+
       printBasicBlock(currBB);
       printedBBs.insert(currBB);
-
       toVisit.pop();
+
       for (auto succ = succ_begin(currBB);
            succ != succ_end(currBB); ++succ){
           BasicBlock *succBB = *succ;
@@ -4131,6 +4138,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
           }
       }
     }
+    errs() << "========= End emitting a branch  ========\n";
 }
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
