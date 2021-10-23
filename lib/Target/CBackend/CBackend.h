@@ -256,6 +256,7 @@ private:
 
   // SUSAN: added functions
   void emitIfBlock(BasicBlock* start, BasicBlock *brBlock);
+  void NodeSplitting(Function &F);
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,

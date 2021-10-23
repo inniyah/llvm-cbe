@@ -33,6 +33,7 @@
 
 // SUSAN: added libs
 #include <queue>
+#include "llvm/Transforms/Utils/Cloning.h"
 
 // Jackson Korba 9/29/14
 #ifndef DEBUG_TYPE
@@ -214,6 +215,9 @@ bool CWriter::runOnFunction(Function &F) {
 
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
+
+  // SUSAN: Node splitting on nodes with 2 or more predecessor marked by "cf.info"
+  NodeSplitting(F);
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -3471,6 +3475,68 @@ void CWriter::declareOneGlobalVariable(GlobalVariable *I) {
     }
   }
   Out << ";\n";
+}
+
+// Split the nodes that have two or more predecessors marked by "cf.info"
+void CWriter::NodeSplitting(Function &F){
+
+  std::map<BasicBlock*, int> numOfMarkedPredecessors;
+
+  for(auto &BB : F){
+    // find the successors of a marked basic block
+    for(auto &inst : BB){
+      if(inst.hasMetadata("cf.info")){
+        for (auto succ = succ_begin(&inst);
+           succ != succ_end(&inst); ++succ){
+          BasicBlock *succBB = *succ;
+          if(numOfMarkedPredecessors.find(succBB) ==
+              numOfMarkedPredecessors.end())
+            numOfMarkedPredecessors[succBB] = 1;
+          else
+            numOfMarkedPredecessors[succBB] ++;
+        }
+        break;
+      }
+    }
+  }
+
+  for(auto const & [BB, numOfSucc] : numOfMarkedPredecessors){
+    if(numOfSucc > 1){
+      int i_pred = 0;
+      for(pred_iterator i=pred_begin(BB), e=pred_end(BB); i!=e; ++i){
+        BasicBlock *pred = *i;
+        BasicBlock *currBB = BB;
+
+        //clone n-1 BBs for splitting
+        if(i_pred){
+          ValueToValueMapTy VMap;
+          BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted"));
+
+          //modify each instruction in copyBB to follow its own def-use chain
+          for(auto &I : *copyBB){
+            for (Use &U : I.operands()){
+              Value *useVal = U.get();
+              if(VMap.find(useVal)!=VMap.end()){
+                U.set(VMap[useVal]);
+              }
+            }
+          }
+
+          F.getBasicBlockList().push_back(copyBB);
+          currBB = copyBB;
+
+          Instruction *term = pred->getTerminator();
+          for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+            BasicBlock *succBB = term->getSuccessor(i_succ);
+            if(succBB == BB){
+              term->replaceSuccessorWith(BB, copyBB);
+            }
+          }
+        }
+        i_pred++;
+      }
+    }
+  }
 }
 
 /// Output all floating point constants that cannot be printed accurately...
