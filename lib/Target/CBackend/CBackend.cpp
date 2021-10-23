@@ -3502,7 +3502,13 @@ void CWriter::NodeSplitting(Function &F){
 
   for(auto const & [BB, numOfSucc] : numOfMarkedPredecessors){
     if(numOfSucc > 1){
+      std::vector<BasicBlock*> copysOfBB;
       int i_pred = 0;
+
+      // Does node splitting with the following steps:
+      // 1. copy the basic block n-1 times, n is the num of predecessor
+      // 2. for each copied block, update the def use chain
+      // 3. each copy gets one unique predecessor
       for(pred_iterator i=pred_begin(BB), e=pred_end(BB); i!=e; ++i){
         BasicBlock *pred = *i;
         BasicBlock *currBB = BB;
@@ -3525,6 +3531,8 @@ void CWriter::NodeSplitting(Function &F){
           F.getBasicBlockList().push_back(copyBB);
           currBB = copyBB;
 
+
+          //modify the CFG according to node splitting algorithm
           Instruction *term = pred->getTerminator();
           for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
             BasicBlock *succBB = term->getSuccessor(i_succ);
@@ -3532,9 +3540,30 @@ void CWriter::NodeSplitting(Function &F){
               term->replaceSuccessorWith(BB, copyBB);
             }
           }
+
+          //modify the predecessor's phi node to include the copied block
+          term = copyBB->getTerminator();
+          for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+            BasicBlock *succBB = term->getSuccessor(i_succ);
+            for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
+              PHINode *phi = cast<PHINode>(I);
+              Value* originalVal = phi->getIncomingValueForBlock(BB);
+              phi->addIncoming(VMap[originalVal],copyBB);
+            }
+          }
         }
+        copysOfBB.push_back(currBB);
         i_pred++;
       }
+
+      //In the future there might be a need to modify the phi nodes
+      /*for(auto & bbToAdjust : copysOfBB){
+        for (BasicBlock::iterator I = bbToAdjust->begin(); isa<PHINode>(I); ++I) {
+          PHINode *PN = cast<PHINode>(I);
+          errs() << "SUSAN: PHINode: " << *PN << "\n";
+        }
+      }*/
+
     }
   }
 }
