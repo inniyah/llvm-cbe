@@ -60,6 +60,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<StringRef,Instruction*>Var2IR;
   std::set<StringRef>allVars, phiVars;
   std::set<BasicBlock*>printedBBs;
+  std::set<BasicBlock*> splittedBBs;
+  // BBs controled by splitted BBs can be printed more than once
 
   // SUSAN: PDT
   PostDominatorTree *PDT = nullptr;

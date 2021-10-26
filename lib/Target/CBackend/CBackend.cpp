@@ -218,6 +218,7 @@ bool CWriter::runOnFunction(Function &F) {
 
   // SUSAN: Node splitting on nodes with 2 or more predecessor marked by "cf.info"
   NodeSplitting(F);
+  PDT->recalculate(F);
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -3500,9 +3501,10 @@ void CWriter::NodeSplitting(Function &F){
     }
   }
 
-  for(auto const & [BB, numOfSucc] : numOfMarkedPredecessors){
-    if(numOfSucc > 1){
-      std::vector<BasicBlock*> copysOfBB;
+  for(auto const & [BB, numOfPred] : numOfMarkedPredecessors){
+    if(numOfPred > 1){
+      errs() << "SUSAN: found a node to split:" << *BB << "\n";
+      std::set<BasicBlock*> copysOfBB;
       int i_pred = 0;
 
       // Does node splitting with the following steps:
@@ -3552,7 +3554,9 @@ void CWriter::NodeSplitting(Function &F){
             }
           }
         }
-        copysOfBB.push_back(currBB);
+        copysOfBB.insert(currBB);
+        errs() << "SUSAN: splittedBBs inserting:" << *currBB << "\n";
+        splittedBBs.insert(currBB);
         i_pred++;
       }
 
@@ -4199,8 +4203,9 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
 }
 
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
-    errs() << "========= Start emitting a branch  ========\n";
-    errs() << *start << "\n";
+    //errs() << "========= Start emitting a branch  ========\n";
+    //errs() << *start << "\n";
+    errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
     std::set<BasicBlock*> visited;
     std::queue<BasicBlock*> toVisit;
     visited.insert(start);
@@ -4213,7 +4218,10 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
         break;
       }
 
-      // print the basic block
+      // splitted blocks, their controled blocks can be printed >1 times
+      if(splittedBBs.find(brBlock) != splittedBBs.end())
+        printedBBs.erase(currBB);
+
       if(printedBBs.find(currBB) != printedBBs.end()){
         errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
         toVisit.pop();
@@ -4221,7 +4229,9 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
       }
 
       printBasicBlock(currBB);
-      printedBBs.insert(currBB);
+
+        printedBBs.insert(currBB);
+
       toVisit.pop();
 
       for (auto succ = succ_begin(currBB);
@@ -4233,7 +4243,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
           }
       }
     }
-    errs() << "========= End emitting a branch  ========\n";
+    //errs() << "========= End emitting a branch  ========\n";
 }
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
@@ -4241,7 +4251,8 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
   // SUSAN: emit if statement
   if(I.hasMetadata("cf.info")){
-    errs() << "SUSAN: getting the if.info from branch" << I << "\n";
+    BasicBlock *brBB = I.getParent();
+    errs() << "SUSAN: getting the if.info from bb" << *(I.getParent()) << "\n";
 
     assert(I.isConditional() && "marked C-if isn't a conditional?\n");
     // emit conditional
@@ -4249,16 +4260,17 @@ void CWriter::visitBranchInst(BranchInst &I) {
     BasicBlock *trueStartBB = I.getSuccessor(0);
     BasicBlock *falseStartBB = I.getSuccessor(1);
 
+    errs() << "SUSAN: trueStartBB:" << *trueStartBB << "\n";
     Out << "  if (";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
 
     // Construct each branch
-    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
-    emitIfBlock(trueStartBB, I.getParent());
+    printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+    emitIfBlock(trueStartBB, brBB);
     Out << "  } else {\n";
-    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
-    emitIfBlock(falseStartBB, I.getParent());
+    printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+    emitIfBlock(falseStartBB, brBB);
 
     Out << "}\n";
 
