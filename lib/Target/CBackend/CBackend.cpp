@@ -4010,7 +4010,7 @@ void CWriter::printLoop(Loop *L) {
       << L->getHeader()->getName() << "' */\n";
 }
 
-void CWriter::printBasicBlock(BasicBlock *BB) {
+void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
   if(printedBBs.find(BB) != printedBBs.end()){
     errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
@@ -4026,7 +4026,7 @@ void CWriter::printBasicBlock(BasicBlock *BB) {
       break;
     }
 
-  if (NeedsLabel) {
+  if (NeedsLabel && printLabel) {
     Out << GetValueName(BB) << ":";
     // A label immediately before a late variable declaration is problematic,
     // because "a label can only be part of a statement and a declaration is not
@@ -4220,8 +4220,11 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
       }
 
       // splitted blocks, their controled blocks can be printed >1 times
-      if(splittedBBs.find(brBlock) != splittedBBs.end())
+      bool printLabel = true;
+      if(splittedBBs.find(brBlock) != splittedBBs.end()){
         printedBBs.erase(currBB);
+        printLabel = false;
+      }
 
       if(printedBBs.find(currBB) != printedBBs.end()){
         errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
@@ -4229,9 +4232,9 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
         continue;
       }
 
-      printBasicBlock(currBB);
+      printBasicBlock(currBB, printLabel);
 
-        printedBBs.insert(currBB);
+      printedBBs.insert(currBB);
 
       toVisit.pop();
 

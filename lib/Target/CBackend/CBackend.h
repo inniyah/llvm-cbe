@@ -290,7 +290,7 @@ private:
   void printFloatingPointConstants(const Constant *C);
 
   void printFunction(Function &);
-  void printBasicBlock(BasicBlock *BB);
+  void printBasicBlock(BasicBlock *BB, bool printLabel = true);
   void printLoop(Loop *L);
 
   void printCast(unsigned opcode, Type *SrcTy, Type *DstTy);
