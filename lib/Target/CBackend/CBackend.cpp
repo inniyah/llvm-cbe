@@ -3503,7 +3503,7 @@ void CWriter::NodeSplitting(Function &F){
 
   for(auto const & [BB, numOfPred] : numOfMarkedPredecessors){
     if(numOfPred > 1){
-      errs() << "SUSAN: found a node to split:" << *BB << "\n";
+      //errs() << "SUSAN: found a node to split:" << *BB << "\n";
       std::set<BasicBlock*> copysOfBB;
       std::vector<BasicBlock*> preds;
 
@@ -3515,50 +3515,48 @@ void CWriter::NodeSplitting(Function &F){
         preds.push_back(*i);
       }
 
-      for(long unsigned int i=0; i<preds.size(); i++){
+      copysOfBB.insert(BB);
+      for(long unsigned int i=1; i<preds.size(); i++){
         BasicBlock *pred = preds[i];
-        BasicBlock *currBB = BB;
         //clone n-1 BBs for splitting
-        if(i){
-          ValueToValueMapTy VMap;
-          BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
+        ValueToValueMapTy VMap;
+        BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
 
-          //modify each instruction in copyBB to follow its own def-use chain
-          for(auto &I : *copyBB){
-            for (Use &U : I.operands()){
-              Value *useVal = U.get();
-              if(VMap.find(useVal)!=VMap.end()){
-                U.set(VMap[useVal]);
-              }
-            }
-          }
-
-          F.getBasicBlockList().push_back(copyBB);
-          currBB = copyBB;
-
-
-          //modify the CFG according to node splitting algorithm
-          Instruction *term = pred->getTerminator();
-          for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
-            BasicBlock *succBB = term->getSuccessor(i_succ);
-            if(succBB == BB){
-              term->replaceSuccessorWith(BB, copyBB);
-            }
-          }
-
-          //modify the predecessor's phi node to include the copied block
-          term = copyBB->getTerminator();
-          for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
-            BasicBlock *succBB = term->getSuccessor(i_succ);
-            for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
-              PHINode *phi = cast<PHINode>(I);
-              Value* originalVal = phi->getIncomingValueForBlock(BB);
-              phi->addIncoming(VMap[originalVal],copyBB);
+        //modify each instruction in copyBB to follow its own def-use chain
+        for(auto &I : *copyBB){
+          for (Use &U : I.operands()){
+            Value *useVal = U.get();
+            if(VMap.find(useVal)!=VMap.end()){
+              U.set(VMap[useVal]);
             }
           }
         }
-        copysOfBB.insert(currBB);
-        splittedBBs.insert(currBB);
+
+        F.getBasicBlockList().push_back(copyBB);
+
+
+        //modify the CFG according to node splitting algorithm
+        Instruction *term = pred->getTerminator();
+        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+          BasicBlock *succBB = term->getSuccessor(i_succ);
+          if(succBB == BB){
+            term->replaceSuccessorWith(BB, copyBB);
+          }
+        }
+
+        //modify the predecessor's phi node to include the copied block
+        term = copyBB->getTerminator();
+        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+          BasicBlock *succBB = term->getSuccessor(i_succ);
+          for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
+            PHINode *phi = cast<PHINode>(I);
+            errs() << "SUSAN: PHINode: " << *phi << "\n";
+            Value* originalVal = phi->getIncomingValueForBlock(BB);
+            phi->addIncoming(VMap[originalVal],copyBB);
+          }
+        }
+        copysOfBB.insert(copyBB);
+        splittedBBs.insert(copyBB);
       }
 
       //In the future there might be a need to modify the phi nodes
@@ -4012,7 +4010,7 @@ void CWriter::printLoop(Loop *L) {
 
 void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
   if(printedBBs.find(BB) != printedBBs.end()){
-    errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
+    //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
   }
   // Don't print the label for the basic block if there are no uses, or if
@@ -4227,7 +4225,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
       }
 
       if(printedBBs.find(currBB) != printedBBs.end()){
-        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+        //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
         toVisit.pop();
         continue;
       }
