@@ -3515,11 +3515,11 @@ void CWriter::NodeSplitting(Function &F){
         preds.push_back(*i);
       }
 
-      copysOfBB.insert(BB);
+
+      ValueToValueMapTy VMap;
       for(long unsigned int i=1; i<preds.size(); i++){
         BasicBlock *pred = preds[i];
         //clone n-1 BBs for splitting
-        ValueToValueMapTy VMap;
         BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
 
         //modify each instruction in copyBB to follow its own def-use chain
@@ -3534,7 +3534,6 @@ void CWriter::NodeSplitting(Function &F){
 
         F.getBasicBlockList().push_back(copyBB);
 
-
         //modify the CFG according to node splitting algorithm
         Instruction *term = pred->getTerminator();
         for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
@@ -3543,21 +3542,31 @@ void CWriter::NodeSplitting(Function &F){
             term->replaceSuccessorWith(BB, copyBB);
           }
         }
+        copysOfBB.insert(copyBB);
+        splittedBBs.insert(copyBB);
+      }
 
-        //modify the predecessor's phi node to include the copied block
-        term = copyBB->getTerminator();
+      for(auto &copyBB : copysOfBB){
+        //modify the successor's phi node to include the copied block
+        errs() << "SUSAN: copyBB is " << *copyBB << "\n";
+        Instruction *term = copyBB->getTerminator();
         for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
           BasicBlock *succBB = term->getSuccessor(i_succ);
           for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
             PHINode *phi = cast<PHINode>(I);
             errs() << "SUSAN: PHINode: " << *phi << "\n";
             Value* originalVal = phi->getIncomingValueForBlock(BB);
-            phi->addIncoming(VMap[originalVal],copyBB);
+            errs() << "originalVal:" << *originalVal << "\n";
+            if(isa<Instruction> (originalVal))
+              phi->addIncoming(VMap[originalVal],copyBB);
+            else if(isa<Constant> (originalVal))
+              phi->addIncoming(originalVal, copyBB);
+            else
+              assert(0 && "PHI value is not Constant or Instruction, check!\n");
           }
         }
-        copysOfBB.insert(copyBB);
-        splittedBBs.insert(copyBB);
       }
+      copysOfBB.insert(BB);
 
       //In the future there might be a need to modify the phi nodes
       /*for(auto & bbToAdjust : copysOfBB){
