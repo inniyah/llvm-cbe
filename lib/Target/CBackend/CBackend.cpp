@@ -3505,20 +3505,23 @@ void CWriter::NodeSplitting(Function &F){
     if(numOfPred > 1){
       errs() << "SUSAN: found a node to split:" << *BB << "\n";
       std::set<BasicBlock*> copysOfBB;
-      int i_pred = 0;
+      std::vector<BasicBlock*> preds;
 
       // Does node splitting with the following steps:
       // 1. copy the basic block n-1 times, n is the num of predecessor
       // 2. for each copied block, update the def use chain
       // 3. each copy gets one unique predecessor
       for(pred_iterator i=pred_begin(BB), e=pred_end(BB); i!=e; ++i){
-        BasicBlock *pred = *i;
-        BasicBlock *currBB = BB;
+        preds.push_back(*i);
+      }
 
+      for(long unsigned int i=0; i<preds.size(); i++){
+        BasicBlock *pred = preds[i];
+        BasicBlock *currBB = BB;
         //clone n-1 BBs for splitting
-        if(i_pred){
+        if(i){
           ValueToValueMapTy VMap;
-          BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted"));
+          BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
 
           //modify each instruction in copyBB to follow its own def-use chain
           for(auto &I : *copyBB){
@@ -3555,9 +3558,7 @@ void CWriter::NodeSplitting(Function &F){
           }
         }
         copysOfBB.insert(currBB);
-        errs() << "SUSAN: splittedBBs inserting:" << *currBB << "\n";
         splittedBBs.insert(currBB);
-        i_pred++;
       }
 
       //In the future there might be a need to modify the phi nodes
