@@ -3548,15 +3548,15 @@ void CWriter::NodeSplitting(Function &F){
 
       for(auto &copyBB : copysOfBB){
         //modify the successor's phi node to include the copied block
-        errs() << "SUSAN: copyBB is " << *copyBB << "\n";
+        //errs() << "SUSAN: copyBB is " << *copyBB << "\n";
         Instruction *term = copyBB->getTerminator();
         for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
           BasicBlock *succBB = term->getSuccessor(i_succ);
           for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
             PHINode *phi = cast<PHINode>(I);
-            errs() << "SUSAN: PHINode: " << *phi << "\n";
+            //errs() << "SUSAN: PHINode: " << *phi << "\n";
             Value* originalVal = phi->getIncomingValueForBlock(BB);
-            errs() << "originalVal:" << *originalVal << "\n";
+            //errs() << "originalVal:" << *originalVal << "\n";
             if(isa<Instruction> (originalVal))
               phi->addIncoming(VMap[originalVal],copyBB);
             else if(isa<Constant> (originalVal))
@@ -3989,8 +3989,10 @@ void CWriter::printFunction(Function &F) {
   // print the basic blocks
   for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
     if (Loop *L = LI->getLoopFor(&*BB)) {
-      if (L->getHeader() == &*BB && L->getParentLoop() == nullptr)
-        printLoop(L);
+      if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
+        //printLoop(L);
+        printLoopNew(L);
+      }
     } else {
       printBasicBlock(&*BB);
       printedBBs.insert(&*BB);
@@ -3998,6 +4000,64 @@ void CWriter::printFunction(Function &F) {
   }
 
   Out << "}\n\n";
+}
+
+void CWriter::printCmpOperator(ICmpInst *icmp){
+    switch (icmp->getPredicate()) {
+    case ICmpInst::ICMP_EQ:
+      Out << " == ";
+      break;
+    case ICmpInst::ICMP_NE:
+      Out << " != ";
+      break;
+    case ICmpInst::ICMP_ULE:
+    case ICmpInst::ICMP_SLE:
+      Out << " <= ";
+      break;
+    case ICmpInst::ICMP_UGE:
+    case ICmpInst::ICMP_SGE:
+      Out << " >= ";
+      break;
+    case ICmpInst::ICMP_ULT:
+    case ICmpInst::ICMP_SLT:
+      Out << " < ";
+      break;
+    case ICmpInst::ICMP_UGT:
+    case ICmpInst::ICMP_SGT:
+      Out << " > ";
+      break;
+    default:
+      DBG_ERRS("Invalid icmp predicate!" << *icmp);
+      errorWithMessage("invalid icmp predicate");
+    }
+}
+
+void CWriter::printLoopNew(Loop *L) {
+  SmallVector< BasicBlock*, 1> ExitingBlocks;
+  L->getExitingBlocks(ExitingBlocks);
+  Out << "while (";
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i)
+  {
+    BasicBlock *exit = *i;
+    if(exit == L->getHeader()){
+      Instruction* term = exit->getTerminator();
+      BranchInst* brInst = dyn_cast<BranchInst>(term);
+      assert(brInst && brInst->isConditional() &&
+          "exit condition is not a conditional branch inst?");
+      CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
+      assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
+      ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(0));
+
+      writeOperandWithCast(icmp->getOperand(0), *icmp);
+
+      printCmpOperator(icmp);
+
+      writeOperandWithCast(icmp->getOperand(1), *icmp);
+      delete(icmp);
+    }
+  }
+  Out << ")\n";
+  // find the exit condition
 }
 
 void CWriter::printLoop(Loop *L) {
@@ -4213,7 +4273,7 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
     //errs() << "========= Start emitting a branch  ========\n";
     //errs() << *start << "\n";
-    errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
+    //errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
     std::set<BasicBlock*> visited;
     std::queue<BasicBlock*> toVisit;
     visited.insert(start);
@@ -4222,7 +4282,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
     while(!toVisit.empty()){
       BasicBlock *currBB = toVisit.front();
       if(PDT->dominates(currBB, brBlock)){
-        errs() << "found post dominator" << *currBB << "\n";
+        //errs() << "found post dominator" << *currBB << "\n";
         break;
       }
 
@@ -4263,7 +4323,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
   // SUSAN: emit if statement
   if(I.hasMetadata("cf.info")){
     BasicBlock *brBB = I.getParent();
-    errs() << "SUSAN: getting the if.info from bb" << *(I.getParent()) << "\n";
+    //errs() << "SUSAN: getting the if.info from bb" << *(I.getParent()) << "\n";
 
     assert(I.isConditional() && "marked C-if isn't a conditional?\n");
     // emit conditional
@@ -4271,7 +4331,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
     BasicBlock *trueStartBB = I.getSuccessor(0);
     BasicBlock *falseStartBB = I.getSuccessor(1);
 
-    errs() << "SUSAN: trueStartBB:" << *trueStartBB << "\n";
+    //errs() << "SUSAN: trueStartBB:" << *trueStartBB << "\n";
     Out << "  if (";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
@@ -4550,7 +4610,8 @@ void CWriter::visitICmpInst(ICmpInst &I) {
   // below for operand 1
   writeOperandWithCast(I.getOperand(0), I);
 
-  switch (I.getPredicate()) {
+  printCmpOperator(&I);
+  /*switch (I.getPredicate()) {
   case ICmpInst::ICMP_EQ:
     Out << " == ";
     break;
@@ -4576,7 +4637,7 @@ void CWriter::visitICmpInst(ICmpInst &I) {
   default:
     DBG_ERRS("Invalid icmp predicate!" << I);
     errorWithMessage("invalid icmp predicate");
-  }
+  }*/
 
   writeOperandWithCast(I.getOperand(1), I);
   if (NeedsClosingParens)

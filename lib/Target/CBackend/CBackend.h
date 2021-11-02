@@ -259,6 +259,7 @@ private:
   // SUSAN: added functions
   void emitIfBlock(BasicBlock* start, BasicBlock *brBlock);
   void NodeSplitting(Function &F);
+  void printCmpOperator(ICmpInst *icmp);
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
@@ -292,6 +293,7 @@ private:
   void printFunction(Function &);
   void printBasicBlock(BasicBlock *BB, bool printLabel = true);
   void printLoop(Loop *L);
+  void printLoopNew(Loop *L);
 
   void printCast(unsigned opcode, Type *SrcTy, Type *DstTy);
   void printConstant(Constant *CPV, enum OperandContext Context);
