@@ -4066,18 +4066,20 @@ void CWriter::printLoopNew(Loop *L) {
       Value *op0 = icmp->getOperand(0);
       Value *op1 = icmp->getOperand(1);
 
-      if(Instruction *op0Inst = dyn_cast<Instruction>(op0)){
-        printInstruction(op0Inst);
-        exitConditionUpdates.push_back(op0Inst);
-      }
-      if(Instruction *op1Inst = dyn_cast<Instruction>(op1)){
-        printInstruction(op1Inst);
-        exitConditionUpdates.push_back(op1Inst);
+      // live-ins
+      Instruction *op0Inst = dyn_cast<Instruction>(op0);
+      Instruction *op1Inst = dyn_cast<Instruction>(op1);
+      for (BasicBlock::iterator I = exit->begin(); I !=  exit->end(); ++I) {
+        Instruction *inst = cast<Instruction>(I);
+        if(isa<PHINode>(inst) || inst == op0Inst || inst == op1Inst ){
+          printInstruction(inst);
+          exitConditionUpdates.push_back(inst);
+        }
+        else if(!isa<BranchInst>(inst) || !isa<CmpInst>(inst))
+          assert(1 && "for.cond contains instructions unexpected!\n");
       }
 
       Out << "while (";
-      errs() << "SUSAN: first operand:" << *(icmp->getOperand(0)) << "\n";
-      errs() << "SUSAN: second operand:" << *(icmp->getOperand(1)) << "\n";
       writeOperandWithCast(icmp->getOperand(0), *icmp);
 
       printCmpOperator(icmp);
@@ -4111,12 +4113,6 @@ void CWriter::printLoopNew(Loop *L) {
   // print the updates for exit condition
   for(auto &update : exitConditionUpdates){
     printInstruction(update);
-  }
-
-   //Print the PHIs in the header
-  for (BasicBlock::iterator I = exit->begin(); isa<PHINode>(I); ++I) {
-    Instruction *phi = cast<Instruction>(I);
-    printInstruction(phi);
   }
 
   Out << "}\n";
@@ -4315,6 +4311,8 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
     // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
     if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
+      errs() << "SUSAN: for curBlock:" << *CurBlock << "\n Successor: " <<
+        *Successor << "\n printing PHI:" << *PN << "\n";
       Out << std::string(Indent, ' ');
       Out << "  " << GetValueName(&*I) << "__PHI_TEMPORARY = ";
       writeOperand(IV, ContextCasted);
