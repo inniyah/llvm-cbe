@@ -4032,13 +4032,29 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
     }
 }
 
+void CWriter::printInstruction(Instruction *I){
+  Out << "  ";
+  if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
+    if (canDeclareLocalLate(*I)) {
+      printTypeName(Out, I->getType(), false) << ' ';
+    }
+    Out << GetValueName(&*I) << " = ";
+  }
+  writeInstComputationInline(*I);
+  Out << ";\n";
+}
+
 void CWriter::printLoopNew(Loop *L) {
+
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
-  Out << "while (";
+  std::vector<Instruction*> exitConditionUpdates;
+  BasicBlock* exit;
+
+  // print compare statement
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i)
   {
-    BasicBlock *exit = *i;
+    exit = *i;
     if(exit == L->getHeader()){
       Instruction* term = exit->getTerminator();
       BranchInst* brInst = dyn_cast<BranchInst>(term);
@@ -4046,8 +4062,22 @@ void CWriter::printLoopNew(Loop *L) {
           "exit condition is not a conditional branch inst?");
       CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
       assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
-      ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(0));
+      ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
+      Value *op0 = icmp->getOperand(0);
+      Value *op1 = icmp->getOperand(1);
 
+      if(Instruction *op0Inst = dyn_cast<Instruction>(op0)){
+        printInstruction(op0Inst);
+        exitConditionUpdates.push_back(op0Inst);
+      }
+      if(Instruction *op1Inst = dyn_cast<Instruction>(op1)){
+        printInstruction(op1Inst);
+        exitConditionUpdates.push_back(op1Inst);
+      }
+
+      Out << "while (";
+      errs() << "SUSAN: first operand:" << *(icmp->getOperand(0)) << "\n";
+      errs() << "SUSAN: second operand:" << *(icmp->getOperand(1)) << "\n";
       writeOperandWithCast(icmp->getOperand(0), *icmp);
 
       printCmpOperator(icmp);
@@ -4055,9 +4085,41 @@ void CWriter::printLoopNew(Loop *L) {
       writeOperandWithCast(icmp->getOperand(1), *icmp);
       delete(icmp);
     }
+    else{
+      assert(1 && "SUSAN: not yet implemented multi exit!\n");
+    }
   }
-  Out << ")\n";
-  // find the exit condition
+  Out << "){\n";
+
+
+  // print loop body
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    Loop *BBLoop = LI->getLoopFor(BB);
+
+    // Don't print Loop header any more
+    if(BB != L->getHeader ()){
+      if (BBLoop == L){
+        printBasicBlock(BB);
+        printedBBs.insert(BB);
+      }
+      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
+        printLoop(BBLoop);
+    }
+  }
+
+  // print the updates for exit condition
+  for(auto &update : exitConditionUpdates){
+    printInstruction(update);
+  }
+
+   //Print the PHIs in the header
+  for (BasicBlock::iterator I = exit->begin(); isa<PHINode>(I); ++I) {
+    Instruction *phi = cast<Instruction>(I);
+    printInstruction(phi);
+  }
+
+  Out << "}\n";
 }
 
 void CWriter::printLoop(Loop *L) {
@@ -4106,13 +4168,13 @@ void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
 
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
-    DILocation *Loc = (*II).getDebugLoc();
+    /*DILocation *Loc = (*II).getDebugLoc();
     if (Loc != nullptr && LastAnnotatedSourceLine != Loc->getLine()) {
       Out << "#line " << Loc->getLine() << " \"" << Loc->getDirectory() << "/"
           << Loc->getFilename() << "\""
           << "\n";
       LastAnnotatedSourceLine = Loc->getLine();
-    }
+    }*/
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
@@ -4233,15 +4295,15 @@ void CWriter::visitUnreachableInst(UnreachableInst &I) {
 
 bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
   /// FIXME: This should be reenabled, but loop reordering safe!!
-  return true;
+  //return true;
 
-  if (std::next(Function::iterator(From)) != Function::iterator(To))
-    return true; // Not the direct successor, we need a goto.
+  //if (std::next(Function::iterator(From)) != Function::iterator(To))
+    //return true; // Not the direct successor, we need a goto.
 
   // isa<SwitchInst>(From->getTerminator())
 
-  if (LI->getLoopFor(From) != LI->getLoopFor(To))
-    return true;
+  //if (LI->getLoopFor(From) != LI->getLoopFor(To))
+    //return true;
   return false;
 }
 
