@@ -260,6 +260,7 @@ private:
   void emitIfBlock(BasicBlock* start, BasicBlock *brBlock);
   void NodeSplitting(Function &F);
   void printCmpOperator(ICmpInst *icmp);
+  void printInstruction(Instruction *I);
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
