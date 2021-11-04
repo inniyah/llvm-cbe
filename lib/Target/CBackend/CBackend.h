@@ -61,6 +61,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<StringRef>allVars, phiVars;
   std::set<BasicBlock*>printedBBs;
   std::set<BasicBlock*> splittedBBs;
+  std::set<Instruction*> declaredInsts;
   // BBs controled by splitted BBs can be printed more than once
 
   // SUSAN: PDT

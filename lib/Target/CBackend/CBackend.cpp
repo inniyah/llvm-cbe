@@ -3962,6 +3962,7 @@ void CWriter::printFunction(Function &F) {
         Out << "  ";
         printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
         Out << ";\n";
+        declaredInsts.insert(&*I);
       }
 
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
@@ -3969,6 +3970,7 @@ void CWriter::printFunction(Function &F) {
         printTypeName(Out, I->getType(), false)
             << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
         Out << ";\n";
+        declaredInsts.insert(&*I);
       }
       PrintedVar = true;
     }
@@ -4072,6 +4074,16 @@ void CWriter::printLoopNew(Loop *L) {
       for (BasicBlock::iterator I = exit->begin(); I !=  exit->end(); ++I) {
         Instruction *inst = cast<Instruction>(I);
         if(isa<PHINode>(inst) || inst == op0Inst || inst == op1Inst ){
+
+          //declare the variable if not declared;
+          if(declaredInsts.find(inst) == declaredInsts.end()){
+             Out << "  ";
+             printTypeName(Out, inst->getType(), false)
+                            << ' ' << GetValueName(inst);
+             Out << ";\n";
+             declaredInsts.insert(inst);
+          }
+
           printInstruction(inst);
           exitConditionUpdates.push_back(inst);
         }
