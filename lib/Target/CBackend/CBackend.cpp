@@ -1669,9 +1669,9 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
 std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: where the vairable names are printed
   Instruction *opInst = dyn_cast<Instruction>(Operand);
-  for (auto const& [var, inst] : Var2IR)
-    if(inst == opInst) return var;
-
+  for (auto const& [var, insts] : Var2IRs)
+    for (auto &inst : insts)
+      if(inst == opInst) return var;
 
 //  if(opInst && IR2VarName.find(opInst) != IR2VarName.end()){
 //    return IR2VarName[opInst];
@@ -3810,16 +3810,18 @@ static inline bool isFPIntBitCast(Instruction &I) {
 bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
   // If there is no mapping between IR and variable, then there's no duplication
   //if(IR2VarName.find(I) == IR2VarName.end()) return true;
-  for (auto const& [var, inst] : Var2IR){
-    if(I == inst){
-      auto Vars2Emit = isPhi? &phiVars : &allVars;
-      for(auto &var2emit : *Vars2Emit){
-        if(var2emit == var){
-          Vars2Emit->erase(var2emit);
-          return true;
+  for (auto const& [var, insts] : Var2IRs){
+    for (auto &inst : insts){
+      if(I == inst){
+        auto Vars2Emit = isPhi? &phiVars : &allVars;
+        for(auto &var2emit : *Vars2Emit){
+          if(var2emit == var){
+            Vars2Emit->erase(var2emit);
+            return true;
+          }
         }
+        return false;
       }
-      return false;
     }
   }
   return true;
@@ -3923,12 +3925,13 @@ void CWriter::printFunction(Function &F) {
             if (isa<ValueAsMetadata>(valMeta)){
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
               if (Instruction *valInst = dyn_cast<Instruction>(valV)){
-                //IR2VarName[valInst] = varName;
-                //for (auto const& [var, inst] : Var2IR)
-                  //assert(!(var != varName && inst == valInst) && "IR mapped to >1 vars!\n");
-                Var2IR[varName] = valInst;
+                if( Var2IRs.find(varName) == Var2IRs.end() )
+                  Var2IRs[varName] = std::set<Instruction*>();
+                Var2IRs[varName].insert(valInst);
+
                 allVars.insert(varName);
                 if (isa<PHINode>(valInst)){
+                  errs() << "SUSAN: inserted PHI for variable preservation:" << *valInst << "\n";
                   phiVars.insert(varName);
                 }
               }
@@ -3962,15 +3965,39 @@ void CWriter::printFunction(Function &F) {
         Out << "  ";
         printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
         Out << ";\n";
-        declaredInsts.insert(&*I);
+
+        // all the insts associated with this variable counts as declared
+        // Shouldn't need this code here but in case there exists empty phi
+        bool foundVar = false;
+        for (auto const& [var, insts] : Var2IRs)
+          for (auto &inst : insts)
+            if(inst == &*I){
+              declaredInsts.insert(insts.begin(), insts.end());
+              foundVar = true;
+            }
+        if(!foundVar)
+          declaredInsts.insert(&*I);
       }
 
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
+        errs() << "SUSAN: printing phi declaration:" << *I << "\n" ;
+        errs() << "PHI Name:" << GetValueName(&*I) << "\n";
         Out << "  ";
         printTypeName(Out, I->getType(), false)
             << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
         Out << ";\n";
-        declaredInsts.insert(&*I);
+
+        // all the insts associated with this variable counts as declared
+        // Shouldn't need this code here but in case there exists empty phi
+        bool foundVar = false;
+        for (auto const& [var, insts] : Var2IRs)
+          for (auto &inst : insts)
+            if(inst == &*I){
+              declaredInsts.insert(insts.begin(), insts.end());
+              foundVar = true;
+            }
+        if(!foundVar)
+          declaredInsts.insert(&*I);
       }
       PrintedVar = true;
     }
@@ -4323,8 +4350,8 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
     // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
     if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
-      errs() << "SUSAN: for curBlock:" << *CurBlock << "\n Successor: " <<
-        *Successor << "\n printing PHI:" << *PN << "\n";
+      //errs() << "SUSAN: for curBlock:" << *CurBlock << "\n Successor: " <<
+        //*Successor << "\n printing PHI:" << *PN << "\n";
       Out << std::string(Indent, ' ');
       Out << "  " << GetValueName(&*I) << "__PHI_TEMPORARY = ";
       writeOperand(IV, ContextCasted);
