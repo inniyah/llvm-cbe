@@ -1681,7 +1681,7 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
     printConstant(CPV, ContextCasted);
 }
 
-std::string CWriter::GetValueName(Value *Operand, Value *Op) {
+std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: where the vairable names are printed
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for (auto const& [var, insts] : Var2IRs)
