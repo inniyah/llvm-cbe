@@ -112,6 +112,21 @@ enum UnaryOps {
   }
 #endif
 
+static bool changeMapValue(
+    std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap,
+    std::map<Instruction*, std::map<StringRef, Instruction*>> currMRVar2ValMap){
+  if(prevMRVar2ValMap.size() == currMRVar2ValMap.size() &&
+     std::equal(prevMRVar2ValMap.begin(), prevMRVar2ValMap.end(),
+                currMRVar2ValMap.begin())){
+    errs() << "SUSAN: maps are equal\n";
+    return true;
+  }
+  else{
+    errs() << "SUSAN: maps are not equal\n";
+    return false;
+  }
+}
+
 static bool isConstantNull(Value *V) {
   if (Constant *C = dyn_cast<Constant>(V))
     return C->isNullValue();
@@ -1666,16 +1681,13 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
     printConstant(CPV, ContextCasted);
 }
 
-std::string CWriter::GetValueName(Value *Operand) {
+std::string CWriter::GetValueName(Value *Operand, Value *Op) {
   //SUSAN: where the vairable names are printed
-  Instruction *opInst = dyn_cast<Instruction>(Operand);
+  Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for (auto const& [var, insts] : Var2IRs)
     for (auto &inst : insts)
-      if(inst == opInst) return var;
+      if(inst == operandInst) return var;
 
-//  if(opInst && IR2VarName.find(opInst) != IR2VarName.end()){
-//    return IR2VarName[opInst];
-//  }
 
   // Resolve potential alias.
   if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Operand)) {
@@ -3961,57 +3973,62 @@ void CWriter::printFunction(Function &F) {
     MRVar2ValMap[currInst] = var2val;
   }
 
-  for (auto &BB : F){
-    bool isFirstInst = true;
-    std::map<StringRef, Instruction*> prev_var2val;
-    for (auto &I : BB) {
-      Instruction *currInst = &I;
+  std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap, currMRVar2ValMap;
+  do{
+    prevMRVar2ValMap = MRVar2ValMap;
+    for (auto &BB : F){
+      bool isFirstInst = true;
+      std::map<StringRef, Instruction*> prev_var2val;
+      for (auto &I : BB) {
+        Instruction *currInst = &I;
 
-      std::set<StringRef> vars2gen;
-      if(IR2vars.find(currInst) != IR2vars.end())
-        vars2gen.insert(IR2vars[currInst].begin(),
-                           IR2vars[currInst].end());
+        std::set<StringRef> vars2gen;
+        if(IR2vars.find(currInst) != IR2vars.end())
+          vars2gen.insert(IR2vars[currInst].begin(),
+                             IR2vars[currInst].end());
 
 
 
-      std::map<StringRef, Instruction*> merged_var2val;
-      std::map<StringRef, Instruction*> prev_pred_var2val;
-      if(isFirstInst){
-        for (pred_iterator PI = pred_begin(&BB),
-             E = pred_end(&BB); PI != E; ++PI){
-          BasicBlock *pred = *PI;
-          Instruction *term = pred->getTerminator();
-          std::map<StringRef, Instruction*> term_var2val = MRVar2ValMap[term];
-          for(auto &var : vars2record){
-            if(prev_pred_var2val.find(var) != prev_pred_var2val.end()
-               && term_var2val.find(var) != term_var2val.end()
-               && term_var2val[var] && prev_pred_var2val[var]
-               && prev_pred_var2val[var] != term_var2val[var]){
-              errs() << "SUSAN!! clearing merged: " << var << "\n";
-              merged_var2val[var] = nullptr;
+        std::map<StringRef, Instruction*> merged_var2val;
+        std::map<StringRef, Instruction*> prev_pred_var2val;
+        if(isFirstInst){
+          for (pred_iterator PI = pred_begin(&BB),
+               E = pred_end(&BB); PI != E; ++PI){
+            BasicBlock *pred = *PI;
+            Instruction *term = pred->getTerminator();
+            std::map<StringRef, Instruction*> term_var2val = MRVar2ValMap[term];
+            for(auto &var : vars2record){
+              if(prev_pred_var2val.find(var) != prev_pred_var2val.end()
+                 && term_var2val.find(var) != term_var2val.end()
+                 && term_var2val[var] && prev_pred_var2val[var]
+                 && prev_pred_var2val[var] != term_var2val[var]){
+                merged_var2val[var] = nullptr;
+              }
+              else
+                merged_var2val[var] = term_var2val[var];
             }
-            else
-              merged_var2val[var] = term_var2val[var];
+            prev_pred_var2val = term_var2val;
           }
-          prev_pred_var2val = term_var2val;
         }
-      }
 
-      std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
-      for(auto &var : vars2record){
-        if(vars2gen.find(var) != vars2gen.end())
-           curr_var2val[var] = currInst;
-        else if(merged_var2val.find(var) != merged_var2val.end())
-           curr_var2val[var] = merged_var2val[var];
-        else if(prev_var2val.find(var) != prev_var2val.end())
-          curr_var2val[var] = prev_var2val[var];
+        std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
+        for(auto &var : vars2record){
+          if(vars2gen.find(var) != vars2gen.end())
+             curr_var2val[var] = currInst;
+          else if(merged_var2val.find(var) != merged_var2val.end())
+             curr_var2val[var] = merged_var2val[var];
+          else if(prev_var2val.find(var) != prev_var2val.end())
+            curr_var2val[var] = prev_var2val[var];
+        }
+        MRVar2ValMap[currInst] = curr_var2val;
+        prev_var2val = curr_var2val;
+        isFirstInst = false;
       }
-      MRVar2ValMap[currInst] = curr_var2val;
-      prev_var2val = curr_var2val;
-      isFirstInst = false;
     }
-  }
+    currMRVar2ValMap = MRVar2ValMap;
+  } while(!changeMapValue(prevMRVar2ValMap, currMRVar2ValMap));
 
+  //test the table
   for(auto &[inst, var2val]: MRVar2ValMap){
     errs() << "SUSAN: inst:" << *inst << "\n";
     for(auto &[var, val] : var2val){
@@ -4019,6 +4036,24 @@ void CWriter::printFunction(Function &F) {
         errs() << var << ":" << *val << "\n";
     }
   }
+
+  // find the contradicting cases and delete them in Var2IRs table
+  // Contradicting: if at any instruction I1, it uses I2, but I2 has two coressponding
+  // variable v1 and v2, however only v2 has value I2 at this point, then the v1 -> I2 mapping needs to be deleted
+  for(auto &[inst, var2val]: MRVar2ValMap)
+    for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i)
+      if(Instruction *operand = dyn_cast<Instruction>(inst->getOperand(i)))
+        for(auto &[var, valAtOperand] : var2val)
+          if (operand == valAtOperand){
+            Var2IRs[var] = std::set<Instruction*>();
+            Var2IRs[var].insert(operand);
+            IR2vars[operand] = std::set<StringRef>();
+            IR2vars[operand].insert(var);
+            for(auto &var2erase : IR2vars[operand])
+              if(var2erase != var)
+                Var2IRs[var2erase].erase(inst);
+          }
+
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {

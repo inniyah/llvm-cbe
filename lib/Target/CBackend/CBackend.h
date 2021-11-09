@@ -374,7 +374,7 @@ private:
                           unsigned Indent);
   void printGEPExpression(Value *Ptr, gep_type_iterator I, gep_type_iterator E);
 
-  std::string GetValueName(Value *Operand);
+  std::string GetValueName(Value *Operand, Value *Op = nullptr);
 
   friend class CWriterTestHelper;
 };
