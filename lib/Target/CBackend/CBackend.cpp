@@ -3925,15 +3925,20 @@ void CWriter::printFunction(Function &F) {
             if (isa<ValueAsMetadata>(valMeta)){
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
               if (Instruction *valInst = dyn_cast<Instruction>(valV)){
+
                 if( Var2IRs.find(varName) == Var2IRs.end() )
                   Var2IRs[varName] = std::set<Instruction*>();
                 Var2IRs[varName].insert(valInst);
 
                 allVars.insert(varName);
                 if (isa<PHINode>(valInst)){
-                  errs() << "SUSAN: inserted PHI for variable preservation:" << *valInst << "\n";
                   phiVars.insert(varName);
                 }
+
+                // build IR -> Vars table
+                if( IR2vars.find(valInst) == IR2vars.end() )
+                  IR2vars[valInst] = std::set<StringRef>();
+                IR2vars[valInst].insert(varName);
               }
             }
             else assert(0 && "SUSAN: 1st argument is not a Value?\n");
@@ -3942,7 +3947,78 @@ void CWriter::printFunction(Function &F) {
     }
   }
 
+  std::set<StringRef> vars2record;
+  for(const auto &[inst, vars] : IR2vars)
+    if(vars.size() > 1){
+      vars2record.insert(vars.begin(), vars.end());
+    }
 
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    Instruction *currInst = &*I;
+    std::map<StringRef, Instruction*> var2val;
+    for(auto & var2record : vars2record)
+      var2val[var2record] = nullptr;
+    MRVar2ValMap[currInst] = var2val;
+  }
+
+  for (auto &BB : F){
+    bool isFirstInst = true;
+    std::map<StringRef, Instruction*> prev_var2val;
+    for (auto &I : BB) {
+      Instruction *currInst = &I;
+
+      std::set<StringRef> vars2gen;
+      if(IR2vars.find(currInst) != IR2vars.end())
+        vars2gen.insert(IR2vars[currInst].begin(),
+                           IR2vars[currInst].end());
+
+
+
+      std::map<StringRef, Instruction*> merged_var2val;
+      std::map<StringRef, Instruction*> prev_pred_var2val;
+      if(isFirstInst){
+        for (pred_iterator PI = pred_begin(&BB),
+             E = pred_end(&BB); PI != E; ++PI){
+          BasicBlock *pred = *PI;
+          Instruction *term = pred->getTerminator();
+          std::map<StringRef, Instruction*> term_var2val = MRVar2ValMap[term];
+          for(auto &var : vars2record){
+            if(prev_pred_var2val.find(var) != prev_pred_var2val.end()
+               && term_var2val.find(var) != term_var2val.end()
+               && term_var2val[var] && prev_pred_var2val[var]
+               && prev_pred_var2val[var] != term_var2val[var]){
+              errs() << "SUSAN!! clearing merged: " << var << "\n";
+              merged_var2val[var] = nullptr;
+            }
+            else
+              merged_var2val[var] = term_var2val[var];
+          }
+          prev_pred_var2val = term_var2val;
+        }
+      }
+
+      std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
+      for(auto &var : vars2record){
+        if(vars2gen.find(var) != vars2gen.end())
+           curr_var2val[var] = currInst;
+        else if(merged_var2val.find(var) != merged_var2val.end())
+           curr_var2val[var] = merged_var2val[var];
+        else if(prev_var2val.find(var) != prev_var2val.end())
+          curr_var2val[var] = prev_var2val[var];
+      }
+      MRVar2ValMap[currInst] = curr_var2val;
+      prev_var2val = curr_var2val;
+      isFirstInst = false;
+    }
+  }
+
+  for(auto &[inst, var2val]: MRVar2ValMap){
+    errs() << "SUSAN: inst:" << *inst << "\n";
+    for(auto &[var, val] : var2val){
+      if(val)
+        errs() << var << ":" << *val << "\n";
+    }
+  }
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
@@ -3980,8 +4056,6 @@ void CWriter::printFunction(Function &F) {
       }
 
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
-        errs() << "SUSAN: printing phi declaration:" << *I << "\n" ;
-        errs() << "PHI Name:" << GetValueName(&*I) << "\n";
         Out << "  ";
         printTypeName(Out, I->getType(), false)
             << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
