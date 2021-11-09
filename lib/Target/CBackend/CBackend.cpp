@@ -4045,13 +4045,11 @@ void CWriter::printFunction(Function &F) {
       if(Instruction *operand = dyn_cast<Instruction>(inst->getOperand(i)))
         for(auto &[var, valAtOperand] : var2val)
           if (operand == valAtOperand){
-            Var2IRs[var] = std::set<Instruction*>();
-            Var2IRs[var].insert(operand);
-            IR2vars[operand] = std::set<StringRef>();
-            IR2vars[operand].insert(var);
             for(auto &var2erase : IR2vars[operand])
               if(var2erase != var)
-                Var2IRs[var2erase].erase(inst);
+                Var2IRs[var2erase].erase(operand);
+            IR2vars[operand] = std::set<StringRef>();
+            IR2vars[operand].insert(var);
           }
 
   // print local variable information for the function
