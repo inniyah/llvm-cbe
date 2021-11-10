@@ -115,16 +115,10 @@ enum UnaryOps {
 static bool changeMapValue(
     std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap,
     std::map<Instruction*, std::map<StringRef, Instruction*>> currMRVar2ValMap){
-  if(prevMRVar2ValMap.size() == currMRVar2ValMap.size() &&
+
+  return prevMRVar2ValMap.size() == currMRVar2ValMap.size() &&
      std::equal(prevMRVar2ValMap.begin(), prevMRVar2ValMap.end(),
-                currMRVar2ValMap.begin())){
-    errs() << "SUSAN: maps are equal\n";
-    return true;
-  }
-  else{
-    errs() << "SUSAN: maps are not equal\n";
-    return false;
-  }
+                currMRVar2ValMap.begin());
 }
 
 static bool isConstantNull(Value *V) {
@@ -4029,13 +4023,13 @@ void CWriter::printFunction(Function &F) {
   } while(!changeMapValue(prevMRVar2ValMap, currMRVar2ValMap));
 
   //test the table
-  for(auto &[inst, var2val]: MRVar2ValMap){
-    errs() << "SUSAN: inst:" << *inst << "\n";
-    for(auto &[var, val] : var2val){
-      if(val)
-        errs() << var << ":" << *val << "\n";
-    }
-  }
+//  for(auto &[inst, var2val]: MRVar2ValMap){
+//    errs() << "SUSAN: inst:" << *inst << "\n";
+//    for(auto &[var, val] : var2val){
+//      if(val)
+//        errs() << var << ":" << *val << "\n";
+//    }
+//  }
 
   // find the contradicting cases and delete them in Var2IRs table
   // Contradicting: if at any instruction I1, it uses I2, but I2 has two coressponding
@@ -4126,8 +4120,8 @@ void CWriter::printFunction(Function &F) {
   for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
     if (Loop *L = LI->getLoopFor(&*BB)) {
       if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
-        //printLoop(L);
-        printLoopNew(L);
+        printLoop(L);
+        //printLoopNew(L);
       }
     } else {
       printBasicBlock(&*BB);
@@ -4183,13 +4177,29 @@ void CWriter::printInstruction(Instruction *I){
 void CWriter::printLoopNew(Loop *L) {
 
   SmallVector< BasicBlock*, 1> ExitingBlocks;
+  SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
+  L->getExitBlocks(ExitBlocks);
   std::vector<Instruction*> exitConditionUpdates;
   BasicBlock* exit;
 
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitBlocks.begin(), e=ExitBlocks.end(); i!=e; ++i){
+    BasicBlock *exit = *i;
+    errs() << "SUSAN: exit block: " << *exit << "\n";
+  }
+
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
+    BasicBlock *exit = *i;
+    errs() << "SUSAN: exiting block: " << *exit << "\n";
+  }
+
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    errs() << "SUSAN: blocks of the loop" << *BB << "\n";
+  }
+
   // print compare statement
-  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i)
-  {
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     exit = *i;
     if(exit == L->getHeader()){
       Instruction* term = exit->getTerminator();
@@ -4240,6 +4250,8 @@ void CWriter::printLoopNew(Loop *L) {
   Out << "){\n";
 
 
+
+
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
@@ -4248,6 +4260,7 @@ void CWriter::printLoopNew(Loop *L) {
     // Don't print Loop header any more
     if(BB != L->getHeader ()){
       if (BBLoop == L){
+        errs() << "SUSAN: printing BB:" << *BB << "\n";
         printBasicBlock(BB);
         printedBBs.insert(BB);
       }
@@ -4437,7 +4450,7 @@ void CWriter::visitUnreachableInst(UnreachableInst &I) {
 
 bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
   /// FIXME: This should be reenabled, but loop reordering safe!!
-  //return true;
+  return true;
 
   //if (std::next(Function::iterator(From)) != Function::iterator(To))
     //return true; // Not the direct successor, we need a goto.
@@ -4522,6 +4535,19 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
     }
     //errs() << "========= End emitting a branch  ========\n";
 }
+
+// an 'if' returnsonly if the true branch's successor has return statement
+// and return bb doesn't pd the branch
+bool isExitingFunction(BasicBlock* bb, BasicBlock *brBB, PostDominatorTree *PDT){
+  Instruction *term = bb->getTerminator();
+  if(term->getNumSuccessors() > 1)
+    return false;
+
+  BasicBlock *succ = term->getSuccessor(0);
+  Instruction *ret = succ->getTerminator();
+  return isa<ReturnInst>(ret) && !PDT->dominates(succ, brBB);
+}
+
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
@@ -4529,27 +4555,47 @@ void CWriter::visitBranchInst(BranchInst &I) {
   // SUSAN: emit if statement
   if(I.hasMetadata("cf.info")){
     BasicBlock *brBB = I.getParent();
-    //errs() << "SUSAN: getting the if.info from bb" << *(I.getParent()) << "\n";
-
     assert(I.isConditional() && "marked C-if isn't a conditional?\n");
     // emit conditional
 
     BasicBlock *trueStartBB = I.getSuccessor(0);
     BasicBlock *falseStartBB = I.getSuccessor(1);
 
-    //errs() << "SUSAN: trueStartBB:" << *trueStartBB << "\n";
     Out << "  if (";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
-
-    // Construct each branch
-    printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-    emitIfBlock(trueStartBB, brBB);
-    Out << "  } else {\n";
-    printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-    emitIfBlock(falseStartBB, brBB);
+    //If structure 1 : on one branch the successor is pd of the branch block
+    //If structure 2 : one branch is branching to a basic block that has return stmt
+    bool trueBrOnly = PDT->dominates(falseStartBB, brBB)
+                      || isExitingFunction(trueStartBB, brBB, PDT);
+//    bool falseBrOnly = PDT->dominates(trueStartBB, brBB)
+//                       || isExitingFunction(falseStartBB);
+    if(trueBrOnly){
+      errs() << "SUSAN: printing the true branch\n";
+      // Construct only true branch
+      printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+      emitIfBlock(trueStartBB, brBB);
+    }
+//    else if(falseBrOnly){
+//      errs() << "SUSAN: printing the false branch\n";
+//      // Construct only false branch
+//      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+//      emitIfBlock(falseStartBB, brBB);
+//    }
+    else{
+      errs() << "SUSAN: printing both branches\n";
+      // Construct only false branch
+      // Construct each branch
+      printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+      emitIfBlock(trueStartBB, brBB);
+      Out << "  } else {\n";
+      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+      emitIfBlock(falseStartBB, brBB);
+    }
 
     Out << "}\n";
+
+
 
     return;
   }
