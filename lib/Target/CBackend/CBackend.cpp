@@ -4120,8 +4120,8 @@ void CWriter::printFunction(Function &F) {
   for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
     if (Loop *L = LI->getLoopFor(&*BB)) {
       if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
-        printLoop(L);
-        //printLoopNew(L);
+        //printLoop(L);
+        printLoopNew(L);
       }
     } else {
       printBasicBlock(&*BB);
@@ -4450,7 +4450,7 @@ void CWriter::visitUnreachableInst(UnreachableInst &I) {
 
 bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
   /// FIXME: This should be reenabled, but loop reordering safe!!
-  return true;
+  //return true;
 
   //if (std::next(Function::iterator(From)) != Function::iterator(To))
     //return true; // Not the direct successor, we need a goto.
