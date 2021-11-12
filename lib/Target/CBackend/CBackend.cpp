@@ -4185,17 +4185,17 @@ void CWriter::printLoopNew(Loop *L) {
 
   for(SmallVector<BasicBlock*,1>::iterator i=ExitBlocks.begin(), e=ExitBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
-    errs() << "SUSAN: exit block: " << *exit << "\n";
+    //errs() << "SUSAN: exit block: " << *exit << "\n";
   }
 
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
-    errs() << "SUSAN: exiting block: " << *exit << "\n";
+    //errs() << "SUSAN: exiting block: " << *exit << "\n";
   }
 
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
-    errs() << "SUSAN: blocks of the loop" << *BB << "\n";
+    //errs() << "SUSAN: blocks of the loop" << *BB << "\n";
   }
 
   // print compare statement
@@ -4260,7 +4260,7 @@ void CWriter::printLoopNew(Loop *L) {
     // Don't print Loop header any more
     if(BB != L->getHeader ()){
       if (BBLoop == L){
-        errs() << "SUSAN: printing BB:" << *BB << "\n";
+        //errs() << "SUSAN: printing BB:" << *BB << "\n";
         printBasicBlock(BB);
         printedBBs.insert(BB);
       }
@@ -4536,16 +4536,17 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
     //errs() << "========= End emitting a branch  ========\n";
 }
 
-// an 'if' returnsonly if the true branch's successor has return statement
-// and return bb doesn't pd the branch
-bool isExitingFunction(BasicBlock* bb, BasicBlock *brBB, PostDominatorTree *PDT){
+// an 'if' returns only if the true branch's successor has return statement
+BasicBlock* isExitingFunction(BasicBlock* bb){
   Instruction *term = bb->getTerminator();
   if(term->getNumSuccessors() > 1)
-    return false;
+    return nullptr;
 
   BasicBlock *succ = term->getSuccessor(0);
   Instruction *ret = succ->getTerminator();
-  return isa<ReturnInst>(ret) && !PDT->dominates(succ, brBB);
+
+  if(isa<ReturnInst>(ret)) return succ;
+  else return nullptr;
 }
 
 // Branch instruction printing - Avoid printing out a branch to a basic block
@@ -4567,21 +4568,27 @@ void CWriter::visitBranchInst(BranchInst &I) {
     //If structure 1 : on one branch the successor is pd of the branch block
     //If structure 2 : one branch is branching to a basic block that has return stmt
     bool trueBrOnly = PDT->dominates(falseStartBB, brBB)
-                      || isExitingFunction(trueStartBB, brBB, PDT);
-//    bool falseBrOnly = PDT->dominates(trueStartBB, brBB)
-//                       || isExitingFunction(falseStartBB);
+                      || isExitingFunction(trueStartBB);
+    bool falseBrOnly = PDT->dominates(trueStartBB, brBB)
+                       || isExitingFunction(falseStartBB);
     if(trueBrOnly){
       errs() << "SUSAN: printing the true branch\n";
       // Construct only true branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB);
+
+      if(BasicBlock *ret = isExitingFunction(trueStartBB))
+        printBasicBlock(ret);
     }
-//    else if(falseBrOnly){
-//      errs() << "SUSAN: printing the false branch\n";
-//      // Construct only false branch
-//      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-//      emitIfBlock(falseStartBB, brBB);
-//    }
+    else if(falseBrOnly){
+      errs() << "SUSAN: printing the false branch\n";
+      // Construct only false branch
+      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+      emitIfBlock(falseStartBB, brBB);
+
+      if(BasicBlock *ret = isExitingFunction(falseStartBB))
+        printBasicBlock(ret);
+    }
     else{
       errs() << "SUSAN: printing both branches\n";
       // Construct only false branch
