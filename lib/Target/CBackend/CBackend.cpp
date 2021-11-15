@@ -4549,6 +4549,7 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
   else return nullptr;
 }
 
+
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
@@ -4562,15 +4563,29 @@ void CWriter::visitBranchInst(BranchInst &I) {
     BasicBlock *trueStartBB = I.getSuccessor(0);
     BasicBlock *falseStartBB = I.getSuccessor(1);
 
-    Out << "  if (";
-    writeOperand(I.getCondition(), ContextCasted);
-    Out << ") {\n";
+
     //If structure 1 : on one branch the successor is pd of the branch block
     //If structure 2 : one branch is branching to a basic block that has return stmt
+    bool exitTrueBr = isExitingFunction(trueStartBB);
+
+    bool exitFalseBr = isExitingFunction(falseStartBB);
+
     bool trueBrOnly = PDT->dominates(falseStartBB, brBB)
-                      || isExitingFunction(trueStartBB);
+                      || (exitTrueBr && !exitFalseBr);
     bool falseBrOnly = PDT->dominates(trueStartBB, brBB)
-                       || isExitingFunction(falseStartBB);
+                       || (exitFalseBr && !exitTrueBr);
+
+    if(falseBrOnly){
+      Out << "  if (!";
+      writeOperand(I.getCondition(), ContextCasted);
+      Out << ") {\n";
+    } else {
+      Out << "  if (";
+      writeOperand(I.getCondition(), ContextCasted);
+      Out << ") {\n";
+    }
+
+
     if(trueBrOnly){
       errs() << "SUSAN: printing the true branch\n";
       // Construct only true branch
