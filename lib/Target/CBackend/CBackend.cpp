@@ -4536,9 +4536,12 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
     //errs() << "========= End emitting a branch  ========\n";
 }
 
-// an 'if' returns only if the true branch's successor has return statement
+// an 'if' returns only if the branch's returning or its successor has return statement
 BasicBlock* isExitingFunction(BasicBlock* bb){
   Instruction *term = bb->getTerminator();
+  if(isa<ReturnInst>(term))
+    return bb;
+
   if(term->getNumSuccessors() > 1)
     return nullptr;
 
@@ -4592,7 +4595,8 @@ void CWriter::visitBranchInst(BranchInst &I) {
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB);
 
-      if(BasicBlock *ret = isExitingFunction(trueStartBB))
+      BasicBlock *ret = isExitingFunction(trueStartBB);
+      if(ret && ret != trueStartBB)
         printBasicBlock(ret);
     }
     else if(falseBrOnly){
@@ -4601,7 +4605,8 @@ void CWriter::visitBranchInst(BranchInst &I) {
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(falseStartBB, brBB);
 
-      if(BasicBlock *ret = isExitingFunction(falseStartBB))
+      BasicBlock *ret = isExitingFunction(trueStartBB);
+      if(ret && ret != falseStartBB)
         printBasicBlock(ret);
     }
     else{
