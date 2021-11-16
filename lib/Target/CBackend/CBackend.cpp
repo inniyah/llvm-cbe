@@ -4180,6 +4180,16 @@ void CWriter::printLoopNew(Loop *L) {
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
   L->getExitBlocks(ExitBlocks);
+
+//  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
+//    errs() << "SUSAN: exiting block:" << **i << "\n";
+//  }
+//
+//  for(SmallVector<BasicBlock*,1>::iterator i=ExitBlocks.begin(), e=ExitBlocks.end(); i!=e; ++i){
+//    errs() << "SUSAN: exit block:" << **i << "\n";
+//  }
+
+
   std::vector<Instruction*> exitConditionUpdates;
   BasicBlock* exit;
 
@@ -4198,7 +4208,7 @@ void CWriter::printLoopNew(Loop *L) {
       Value *op0 = icmp->getOperand(0);
       Value *op1 = icmp->getOperand(1);
 
-      // live-ins
+      // print live-in declarations
       Instruction *op0Inst = dyn_cast<Instruction>(op0);
       Instruction *op1Inst = dyn_cast<Instruction>(op1);
       for (BasicBlock::iterator I = exit->begin(); I !=  exit->end(); ++I) {
@@ -4213,22 +4223,16 @@ void CWriter::printLoopNew(Loop *L) {
              Out << ";\n";
              declaredInsts.insert(inst);
           }
-
-          //printInstruction(inst);
-          //exitConditionUpdates.push_back(inst);
         }
         else if(!isa<BranchInst>(inst) || !isa<CmpInst>(inst))
           assert(1 && "for.cond contains instructions unexpected!\n");
       }
 
+      // print prologue
       for (BasicBlock::iterator I = exit->begin();
            cast<Instruction>(I) !=  cmp && I != exit->end();
-           ++I){
-        errs() << "SUSAN: printing instruction:" << *cast<Instruction>(I) << "\n";
+           ++I)
         printInstruction(cast<Instruction>(I));
-      }
-
-      //printBasicBlock(L->getHeader());
 
       Out << "while (";
       writeOperandWithCast(icmp->getOperand(0), *icmp);
@@ -4245,7 +4249,19 @@ void CWriter::printLoopNew(Loop *L) {
   Out << "){\n";
 
 
-
+  // mark loop exits if it's not part of the loop
+  std::set<BasicBlock*> irregularLoopExits;
+  for(auto &exitBB : ExitBlocks){
+    BasicBlock *pred = exitBB->getSinglePredecessor();
+    if(pred && pred != L->getHeader()){
+      Instruction *term = exitBB->getTerminator();
+      LLVMContext &context = term->getContext();
+      MDNode *mdnode = MDNode::get(context, MDString::get(context, "branch inst that's an irregular loop exit"));
+      term->setMetadata("irregular.exit", mdnode);
+      errs() << "SUSAN: found irregular: " << *exitBB << "\n";
+      irregularLoopExits.insert(exitBB);
+    }
+  }
 
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
@@ -4254,8 +4270,9 @@ void CWriter::printLoopNew(Loop *L) {
 
     // Don't print Loop header any more
     if(BB != L->getHeader ()){
-      if (BBLoop == L){
-        //errs() << "SUSAN: printing BB:" << *BB << "\n";
+      if(irregularLoopExits.find(BB) != irregularLoopExits.end()){
+      }
+      else if (BBLoop == L){
         printBasicBlock(BB);
         printedBBs.insert(BB);
       }
@@ -4264,15 +4281,9 @@ void CWriter::printLoopNew(Loop *L) {
     }
   }
 
-  // print the updates for exit condition
-  //for(auto &update : exitConditionUpdates){
-  //  printInstruction(update);
-  //}
-  errs() << "SUSAN: exit: " << *exit << "\n";
   for (BasicBlock::iterator I = L->getHeader()->begin();
        cast<Instruction>(I) !=  cmp && I != L->getHeader()->end();
        ++I){
-    errs() << "SUSAN: printing instruction:" << *cast<Instruction>(I) << "\n";
     printInstruction(cast<Instruction>(I));
   }
 
@@ -4558,7 +4569,12 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
-
+  // SUSAN: emit irregular loop exit
+  if(I.hasMetadata("irregular.exit")){
+    assert(I.getNumSuccessors() == 1 && "irregular exit doesn't have 1 exit??\n");
+    Out << "  break;\n";
+    return;
+  }
   // SUSAN: emit if statement
   if(I.hasMetadata("cf.info")){
     BasicBlock *brBB = I.getParent();
