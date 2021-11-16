@@ -4183,21 +4183,7 @@ void CWriter::printLoopNew(Loop *L) {
   std::vector<Instruction*> exitConditionUpdates;
   BasicBlock* exit;
 
-  for(SmallVector<BasicBlock*,1>::iterator i=ExitBlocks.begin(), e=ExitBlocks.end(); i!=e; ++i){
-    BasicBlock *exit = *i;
-    //errs() << "SUSAN: exit block: " << *exit << "\n";
-  }
-
-  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
-    BasicBlock *exit = *i;
-    //errs() << "SUSAN: exiting block: " << *exit << "\n";
-  }
-
-  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
-    BasicBlock *BB = L->getBlocks()[i];
-    //errs() << "SUSAN: blocks of the loop" << *BB << "\n";
-  }
-
+  CmpInst *cmp;
   // print compare statement
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     exit = *i;
@@ -4206,7 +4192,7 @@ void CWriter::printLoopNew(Loop *L) {
       BranchInst* brInst = dyn_cast<BranchInst>(term);
       assert(brInst && brInst->isConditional() &&
           "exit condition is not a conditional branch inst?");
-      CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
+      cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
       assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
       ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
       Value *op0 = icmp->getOperand(0);
@@ -4228,12 +4214,21 @@ void CWriter::printLoopNew(Loop *L) {
              declaredInsts.insert(inst);
           }
 
-          printInstruction(inst);
-          exitConditionUpdates.push_back(inst);
+          //printInstruction(inst);
+          //exitConditionUpdates.push_back(inst);
         }
         else if(!isa<BranchInst>(inst) || !isa<CmpInst>(inst))
           assert(1 && "for.cond contains instructions unexpected!\n");
       }
+
+      for (BasicBlock::iterator I = exit->begin();
+           cast<Instruction>(I) !=  cmp && I != exit->end();
+           ++I){
+        errs() << "SUSAN: printing instruction:" << *cast<Instruction>(I) << "\n";
+        printInstruction(cast<Instruction>(I));
+      }
+
+      //printBasicBlock(L->getHeader());
 
       Out << "while (";
       writeOperandWithCast(icmp->getOperand(0), *icmp);
@@ -4265,13 +4260,20 @@ void CWriter::printLoopNew(Loop *L) {
         printedBBs.insert(BB);
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
-        printLoop(BBLoop);
+        printLoopNew(BBLoop);
     }
   }
 
   // print the updates for exit condition
-  for(auto &update : exitConditionUpdates){
-    printInstruction(update);
+  //for(auto &update : exitConditionUpdates){
+  //  printInstruction(update);
+  //}
+  errs() << "SUSAN: exit: " << *exit << "\n";
+  for (BasicBlock::iterator I = L->getHeader()->begin();
+       cast<Instruction>(I) !=  cmp && I != L->getHeader()->end();
+       ++I){
+    errs() << "SUSAN: printing instruction:" << *cast<Instruction>(I) << "\n";
+    printInstruction(cast<Instruction>(I));
   }
 
   Out << "}\n";
