@@ -4569,8 +4569,16 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
+
   // SUSAN: emit irregular loop exit
   if(I.hasMetadata("irregular.exit")){
+    //if the branch leads to a return statement, then don't emit break, it's taken care.
+    for (auto succ = succ_begin(&I); succ != succ_end(&I); ++succ){
+	    BasicBlock *succBB = *succ;
+      Instruction *ret = succBB->getTerminator();
+      if(isa<ReturnInst>(ret))
+        return;
+    }
     assert(I.getNumSuccessors() == 1 && "irregular exit doesn't have 1 exit??\n");
     Out << "  break;\n";
     return;
