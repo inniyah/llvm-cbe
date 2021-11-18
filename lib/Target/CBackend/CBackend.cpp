@@ -4258,7 +4258,6 @@ void CWriter::printLoopNew(Loop *L) {
       LLVMContext &context = term->getContext();
       MDNode *mdnode = MDNode::get(context, MDString::get(context, "branch inst that's an irregular loop exit"));
       term->setMetadata("irregular.exit", mdnode);
-      errs() << "SUSAN: found irregular: " << *exitBB << "\n";
       irregularLoopExits.insert(exitBB);
     }
   }
@@ -4616,14 +4615,16 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
 
     if(trueBrOnly){
-      errs() << "SUSAN: printing the true branch\n";
+      errs() << "SUSAN: printing the true branch for " << *brBB << "\n";
       // Construct only true branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != trueStartBB)
+      if(ret && ret != trueStartBB){
+        printPHICopiesForSuccessor(trueStartBB, ret, 2);
         printBasicBlock(ret);
+      }
     }
     else if(falseBrOnly){
       errs() << "SUSAN: printing the false branch\n";
@@ -4631,9 +4632,11 @@ void CWriter::visitBranchInst(BranchInst &I) {
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(falseStartBB, brBB);
 
-      BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != falseStartBB)
+      BasicBlock *ret = isExitingFunction(falseStartBB);
+      if(ret && ret != falseStartBB){
+        printPHICopiesForSuccessor(falseStartBB, ret, 2);
         printBasicBlock(ret);
+      }
     }
     else{
       errs() << "SUSAN: printing both branches\n";
