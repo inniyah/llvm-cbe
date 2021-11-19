@@ -225,10 +225,15 @@ bool CWriter::runOnFunction(Function &F) {
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
 
-  // SUSAN: Node splitting on nodes with 2 or more predecessor marked by "cf.info"
-  markLoopIrregularExits(F);
-  NodeSplitting(F);
-  PDT->recalculate(F);
+  //SUSAN: preprocessings
+  //1. mark all the irregular exits of a loop (break/return)
+  //2. node splitting on irregular graph
+  //3. identify branches that can be expressed as if statement
+
+  std::set<BasicBlock*> visitedBBs;
+  markLoopIrregularExits(F); //1
+  markIfBranches(F, &visitedBBs); NodeSplitting(F); PDT->recalculate(F); //2
+  markIfBranches(F, &visitedBBs); //3
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -3510,7 +3515,28 @@ void CWriter::markLoopIrregularExits(Function &F){
   }
 }
 
-// Split the nodes that have two or more predecessors marked by "cf.info"
+// If branch criterias:
+// 1. conditional branch
+// 2. branch is not from loop exits
+void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
+  for(auto &BB : F){
+    //for splitted nodes
+    if(visitedBBs->find(&BB) != visitedBBs->end())
+      continue;
+    visitedBBs->insert(&BB);
+
+    Instruction *term = BB.getTerminator();
+    BranchInst *br = dyn_cast<BranchInst>(term);
+    if(br && br->isConditional()){
+      Loop *L = LI->getLoopFor(&BB);
+      if(L && L->getHeader() == &BB)
+        continue;
+      ifBranches.insert(br);
+    }
+  }
+}
+
+// Split the nodes that have two or more predecessors marked by if statement
 void CWriter::NodeSplitting(Function &F){
 
   std::map<BasicBlock*, int> numOfMarkedPredecessors;
@@ -3518,7 +3544,7 @@ void CWriter::NodeSplitting(Function &F){
   for(auto &BB : F){
     // find the successors of a marked basic block
     for(auto &inst : BB){
-      if(inst.hasMetadata("cf.info")){
+      if(ifBranches.find(dyn_cast<BranchInst>(&inst)) != ifBranches.end()){
         for (auto succ = succ_begin(&inst);
            succ != succ_end(&inst); ++succ){
           BasicBlock *succBB = *succ;
@@ -4237,21 +4263,15 @@ void CWriter::printLoopNew(Loop *L) {
       // print live-in declarations
       Instruction *op0Inst = dyn_cast<Instruction>(op0);
       Instruction *op1Inst = dyn_cast<Instruction>(op1);
-      for (BasicBlock::iterator I = exit->begin(); I !=  exit->end(); ++I) {
+      for (BasicBlock::iterator I = exit->begin(); cast<Instruction>(I) !=  cmp; ++I) {
         Instruction *inst = cast<Instruction>(I);
-        if(isa<PHINode>(inst) || inst == op0Inst || inst == op1Inst ){
-
-          //declare the variable if not declared;
-          if(declaredInsts.find(inst) == declaredInsts.end()){
-             Out << "  ";
-             printTypeName(Out, inst->getType(), false)
-                            << ' ' << GetValueName(inst);
-             Out << ";\n";
-             declaredInsts.insert(inst);
-          }
+        if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
+           Out << "  ";
+           printTypeName(Out, inst->getType(), false)
+                          << ' ' << GetValueName(inst);
+           Out << ";\n";
+           declaredInsts.insert(inst);
         }
-        else if(!isa<BranchInst>(inst) || !isa<CmpInst>(inst))
-          assert(1 && "for.cond contains instructions unexpected!\n");
       }
 
       // print prologue
@@ -4594,7 +4614,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
     return;
   }
   // SUSAN: emit if statement
-  if(I.hasMetadata("cf.info")){
+  if(ifBranches.find(dyn_cast<BranchInst>(&I)) != ifBranches.end()){
     BasicBlock *brBB = I.getParent();
     assert(I.isConditional() && "marked C-if isn't a conditional?\n");
     // emit conditional
@@ -4615,6 +4635,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
                        || (exitFalseBr && !exitTrueBr);
 
     if(falseBrOnly){
+      errs() << "SUSAN: false branch only!!!" << *brBB << "\n";
       Out << "  if (!";
       writeOperand(I.getCondition(), ContextCasted);
       Out << ") {\n";

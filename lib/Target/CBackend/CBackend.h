@@ -66,6 +66,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> splittedBBs;
   std::set<Instruction*> declaredInsts;
   std::set<BasicBlock*> irregularLoopExits;
+  std::set<BranchInst*> ifBranches;
   // BBs controled by splitted BBs can be printed more than once
 
   // SUSAN: PDT
@@ -265,6 +266,7 @@ private:
   void emitIfBlock(BasicBlock* start, BasicBlock *brBlock);
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
+  void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
   void printCmpOperator(ICmpInst *icmp);
   void printInstruction(Instruction *I);
 
