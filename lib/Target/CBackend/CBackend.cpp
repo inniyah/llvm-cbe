@@ -226,6 +226,7 @@ bool CWriter::runOnFunction(Function &F) {
   bool Modified = lowerIntrinsics(F);
 
   // SUSAN: Node splitting on nodes with 2 or more predecessor marked by "cf.info"
+  markLoopIrregularExits(F);
   NodeSplitting(F);
   PDT->recalculate(F);
 
@@ -3484,6 +3485,31 @@ void CWriter::declareOneGlobalVariable(GlobalVariable *I) {
   Out << ";\n";
 }
 
+void CWriter::markLoopIrregularExits(Function &F){
+  std::list<Loop*> loops( LI->begin(), LI->end() );
+  while( !loops.empty() )
+  {
+    Loop *L = loops.front();
+    loops.pop_front();
+
+    errs() << "SUSAN: print loop:" << *L << "\n";
+    SmallVector< BasicBlock*, 1> ExitBlocks;
+    L->getExitBlocks(ExitBlocks);
+    for(auto &exitBB : ExitBlocks){
+      errs() << "SUSAN: exit block:" << *exitBB << "\n";
+      BasicBlock *pred = exitBB->getSinglePredecessor();
+      if(pred && pred != L->getHeader()){
+        Instruction *term = exitBB->getTerminator();
+        errs() << "SUSAN: irregular exit: " << *term << "\n";
+        irregularLoopExits.insert(exitBB);
+      }
+    }
+
+    loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+  }
+}
+
 // Split the nodes that have two or more predecessors marked by "cf.info"
 void CWriter::NodeSplitting(Function &F){
 
@@ -4248,20 +4274,6 @@ void CWriter::printLoopNew(Loop *L) {
   }
   Out << "){\n";
 
-
-  // mark loop exits if it's not part of the loop
-  std::set<BasicBlock*> irregularLoopExits;
-  for(auto &exitBB : ExitBlocks){
-    BasicBlock *pred = exitBB->getSinglePredecessor();
-    if(pred && pred != L->getHeader()){
-      Instruction *term = exitBB->getTerminator();
-      LLVMContext &context = term->getContext();
-      MDNode *mdnode = MDNode::get(context, MDString::get(context, "branch inst that's an irregular loop exit"));
-      term->setMetadata("irregular.exit", mdnode);
-      irregularLoopExits.insert(exitBB);
-    }
-  }
-
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
@@ -4269,9 +4281,7 @@ void CWriter::printLoopNew(Loop *L) {
 
     // Don't print Loop header any more
     if(BB != L->getHeader ()){
-      if(irregularLoopExits.find(BB) != irregularLoopExits.end()){
-      }
-      else if (BBLoop == L){
+      if (BBLoop == L){
         printBasicBlock(BB);
         printedBBs.insert(BB);
       }
@@ -4570,7 +4580,8 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 void CWriter::visitBranchInst(BranchInst &I) {
 
   // SUSAN: emit irregular loop exit
-  if(I.hasMetadata("irregular.exit")){
+  BasicBlock *exitBB = I.getParent();
+  if(irregularLoopExits.find(exitBB) != irregularLoopExits.end()){
     //if the branch leads to a return statement, then don't emit break, it's taken care.
     for (auto succ = succ_begin(&I); succ != succ_end(&I); ++succ){
 	    BasicBlock *succBB = *succ;
@@ -4615,7 +4626,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
 
     if(trueBrOnly){
-      errs() << "SUSAN: printing the true branch for " << *brBB << "\n";
       // Construct only true branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB);
@@ -4627,7 +4637,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
       }
     }
     else if(falseBrOnly){
-      errs() << "SUSAN: printing the false branch\n";
       // Construct only false branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(falseStartBB, brBB);
@@ -4639,9 +4648,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
       }
     }
     else{
-      errs() << "SUSAN: printing both branches\n";
-      // Construct only false branch
-      // Construct each branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB);
       Out << "  } else {\n";
