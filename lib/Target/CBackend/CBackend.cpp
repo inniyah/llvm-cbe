@@ -4226,6 +4226,17 @@ void CWriter::printInstruction(Instruction *I){
   Out << ";\n";
 }
 
+bool headerIsExiting (Loop *L){
+  SmallVector< BasicBlock*, 1> ExitingBlocks;
+  L->getExitingBlocks(ExitingBlocks);
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
+    BasicBlock *exit = *i;
+    if(exit == L->getHeader())
+      return true;
+  }
+  return false;
+}
+
 void CWriter::printLoopNew(Loop *L) {
 
   SmallVector< BasicBlock*, 1> ExitingBlocks;
@@ -4233,62 +4244,47 @@ void CWriter::printLoopNew(Loop *L) {
   L->getExitingBlocks(ExitingBlocks);
   L->getExitBlocks(ExitBlocks);
 
-//  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
-//    errs() << "SUSAN: exiting block:" << **i << "\n";
-//  }
-//
-//  for(SmallVector<BasicBlock*,1>::iterator i=ExitBlocks.begin(), e=ExitBlocks.end(); i!=e; ++i){
-//    errs() << "SUSAN: exit block:" << **i << "\n";
-//  }
-
-
   std::vector<Instruction*> exitConditionUpdates;
-  BasicBlock* exit;
 
   CmpInst *cmp;
   // print compare statement
-  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
-    exit = *i;
-    if(exit == L->getHeader()){
-      Instruction* term = exit->getTerminator();
-      BranchInst* brInst = dyn_cast<BranchInst>(term);
-      assert(brInst && brInst->isConditional() &&
-          "exit condition is not a conditional branch inst?");
-      cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
-      assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
-      ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
+  if(headerIsExiting(L)){
+    BasicBlock *exit = L->getHeader();
+    Instruction* term = exit->getTerminator();
+    BranchInst* brInst = dyn_cast<BranchInst>(term);
+    assert(brInst && brInst->isConditional() &&
+        "exit condition is not a conditional branch inst?");
+    cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
+    assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
+    ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
 
-      // print live-in declarations
-      for (BasicBlock::iterator I = exit->begin(); cast<Instruction>(I) !=  cmp; ++I) {
-        Instruction *inst = cast<Instruction>(I);
-        if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
-           Out << "  ";
-           printTypeName(Out, inst->getType(), false)
-                          << ' ' << GetValueName(inst);
-           Out << ";\n";
-           declaredInsts.insert(inst);
-        }
+    // print live-in declarations
+    for (BasicBlock::iterator I = exit->begin(); cast<Instruction>(I) !=  cmp; ++I) {
+      Instruction *inst = cast<Instruction>(I);
+      if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
+         Out << "  ";
+         printTypeName(Out, inst->getType(), false)
+                        << ' ' << GetValueName(inst);
+         Out << ";\n";
+         declaredInsts.insert(inst);
       }
-
-      // print prologue
-      for (BasicBlock::iterator I = exit->begin();
-           cast<Instruction>(I) !=  cmp && I != exit->end();
-           ++I)
-        printInstruction(cast<Instruction>(I));
-
-      Out << "while (";
-      writeOperandWithCast(icmp->getOperand(0), *icmp);
-
-      printCmpOperator(icmp);
-
-      writeOperandWithCast(icmp->getOperand(1), *icmp);
-      delete(icmp);
     }
-    else{
-      assert(1 && "SUSAN: not yet implemented multi exit!\n");
-    }
+
+    // print prologue
+    for (BasicBlock::iterator I = exit->begin();
+         cast<Instruction>(I) !=  cmp && I != exit->end();
+         ++I)
+      printInstruction(cast<Instruction>(I));
+
+    Out << "while (";
+    writeOperandWithCast(icmp->getOperand(0), *icmp);
+
+    printCmpOperator(icmp);
+
+    writeOperandWithCast(icmp->getOperand(1), *icmp);
+    delete(icmp);
+    Out << "){\n";
   }
-  Out << "){\n";
 
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
