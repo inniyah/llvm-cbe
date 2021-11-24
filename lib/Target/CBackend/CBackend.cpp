@@ -34,6 +34,7 @@
 // SUSAN: added libs
 #include <queue>
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Analysis/CFG.h"
 
 // Jackson Korba 9/29/14
 #ifndef DEBUG_TYPE
@@ -4627,9 +4628,11 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
     bool exitFalseBr = isExitingFunction(falseStartBB);
 
-    bool trueBrOnly = PDT->dominates(falseStartBB, brBB)
+    bool trueBrOnly = (PDT->dominates(falseStartBB, brBB)
+                      && !isPotentiallyReachable(trueStartBB, brBB))
                       || (exitTrueBr && !exitFalseBr);
-    bool falseBrOnly = PDT->dominates(trueStartBB, brBB)
+    bool falseBrOnly = (PDT->dominates(trueStartBB, brBB)
+                       && !isPotentiallyReachable(trueStartBB, brBB))
                        || (exitFalseBr && !exitTrueBr);
 
     if(falseBrOnly){
