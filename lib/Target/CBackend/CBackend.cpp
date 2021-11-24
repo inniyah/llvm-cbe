@@ -4285,6 +4285,9 @@ void CWriter::printLoopNew(Loop *L) {
     delete(icmp);
     Out << "){\n";
   }
+  else{
+    Out << "while(1){\n";
+  }
 
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
