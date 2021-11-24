@@ -4605,7 +4605,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
       if(isa<ReturnInst>(ret))
         return;
     }
-    assert(I.getNumSuccessors() == 1 && "irregular exit doesn't have 1 exit??\n");
     Out << "  break;\n";
     return;
   }
