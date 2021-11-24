@@ -4287,6 +4287,7 @@ void CWriter::printLoopNew(Loop *L) {
   }
   else{
     Out << "while(1){\n";
+    printBasicBlock(L->getHeader());
   }
 
   // print loop body
@@ -4305,11 +4306,12 @@ void CWriter::printLoopNew(Loop *L) {
     }
   }
 
-  for (BasicBlock::iterator I = L->getHeader()->begin();
-       cast<Instruction>(I) !=  cmp && I != L->getHeader()->end();
-       ++I){
-    printInstruction(cast<Instruction>(I));
-  }
+  if(headerIsExiting(L))
+   for (BasicBlock::iterator I = L->getHeader()->begin();
+        cast<Instruction>(I) !=  cmp && I != L->getHeader()->end();
+        ++I){
+     printInstruction(cast<Instruction>(I));
+   }
 
   Out << "}\n";
 }
