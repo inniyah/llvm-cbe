@@ -3515,9 +3515,20 @@ void CWriter::markLoopIrregularExits(Function &F){
   }
 }
 
+bool headerIsExiting (Loop *L){
+  SmallVector< BasicBlock*, 1> ExitingBlocks;
+  L->getExitingBlocks(ExitingBlocks);
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
+    BasicBlock *exit = *i;
+    if(exit == L->getHeader())
+      return true;
+  }
+  return false;
+}
+
 // If branch criterias:
 // 1. conditional branch
-// 2. branch is not from loop exits
+// 2. branch is not from weird loop exits
 void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
   for(auto &BB : F){
     //for splitted nodes
@@ -3529,7 +3540,7 @@ void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
     BranchInst *br = dyn_cast<BranchInst>(term);
     if(br && br->isConditional()){
       Loop *L = LI->getLoopFor(&BB);
-      if(L && L->getHeader() == &BB)
+      if(L && L->getHeader() == &BB && headerIsExiting(L))
         continue;
       ifBranches.insert(br);
     }
@@ -4226,16 +4237,7 @@ void CWriter::printInstruction(Instruction *I){
   Out << ";\n";
 }
 
-bool headerIsExiting (Loop *L){
-  SmallVector< BasicBlock*, 1> ExitingBlocks;
-  L->getExitingBlocks(ExitingBlocks);
-  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
-    BasicBlock *exit = *i;
-    if(exit == L->getHeader())
-      return true;
-  }
-  return false;
-}
+
 
 void CWriter::printLoopNew(Loop *L) {
 
