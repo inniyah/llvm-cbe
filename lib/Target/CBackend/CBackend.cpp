@@ -4257,12 +4257,8 @@ void CWriter::printLoopNew(Loop *L) {
       cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
       assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
       ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
-      Value *op0 = icmp->getOperand(0);
-      Value *op1 = icmp->getOperand(1);
 
       // print live-in declarations
-      Instruction *op0Inst = dyn_cast<Instruction>(op0);
-      Instruction *op1Inst = dyn_cast<Instruction>(op1);
       for (BasicBlock::iterator I = exit->begin(); cast<Instruction>(I) !=  cmp; ++I) {
         Instruction *inst = cast<Instruction>(I);
         if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
