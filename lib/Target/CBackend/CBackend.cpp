@@ -3499,21 +3499,25 @@ void CWriter::markLoopIrregularExits(Function &F){
     loops.pop_front();
 
     errs() << "SUSAN: print loop:" << *L << "\n";
-    SmallVector< BasicBlock*, 1> ExitBlocks;
+    SmallVector< BasicBlock*, 8> ExitBlocks, ExitingBlocks;
+    SmallVector<std::pair<BasicBlock *, BasicBlock *>, 8> ExitEdges;
     L->getExitBlocks(ExitBlocks);
-    for(auto &exitBB : ExitBlocks){
-      errs() << "SUSAN: exit block:" << *exitBB << "\n";
-      BasicBlock *pred = exitBB->getSinglePredecessor();
-      if(pred && pred != L->getHeader()){
-        Instruction *term = exitBB->getTerminator();
-        errs() << "SUSAN: irregular exit: " << *term << "\n";
-        irregularLoopExits.insert(exitBB);
+    L->getExitingBlocks(ExitingBlocks);
+    L->getExitEdges(ExitEdges);
+    for(auto edge : ExitEdges){
+      BasicBlock *exitingBB = edge.first;
+      BasicBlock *exitBB = edge.second;
+      if(exitingBB != L->getHeader()){
+        errs() << "SUSAN: irregular exit from bb:" << *exitingBB << "\nto BB:" << *exitBB << "\n";
+        irregularLoopExits.insert(edge);
       }
     }
 
     loops.insert(loops.end(), L->getSubLoops().begin(),
         L->getSubLoops().end());
   }
+
+
 }
 
 bool headerIsExiting (Loop *L){
@@ -4317,6 +4321,7 @@ void CWriter::printLoopNew(Loop *L) {
    }
 
   Out << "}\n";
+
 }
 
 void CWriter::printLoop(Loop *L) {
@@ -4531,7 +4536,7 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
   }
 }
 
-void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
+void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart){
     //errs() << "========= Start emitting a branch  ========\n";
     //errs() << *start << "\n";
     //errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
@@ -4542,7 +4547,11 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock){
 
     while(!toVisit.empty()){
       BasicBlock *currBB = toVisit.front();
-      if(PDT->dominates(currBB, brBlock)){
+
+      // TODO: need a systematic way to check when does a branch end
+      // currently just adding patches here and there
+      // e.x.,: currBB == otherStart is added from supermutation
+      if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
         //errs() << "found post dominator" << *currBB << "\n";
         break;
       }
@@ -4598,59 +4607,89 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
+  CurInstr = &I;
 
-  // SUSAN: emit irregular loop exit
-  BasicBlock *exitBB = I.getParent();
-  if(irregularLoopExits.find(exitBB) != irregularLoopExits.end()){
-    //if the branch leads to a return statement, then don't emit break, it's taken care.
-    for (auto succ = succ_begin(&I); succ != succ_end(&I); ++succ){
-	    BasicBlock *succBB = *succ;
-      Instruction *ret = succBB->getTerminator();
-      if(isa<ReturnInst>(ret))
-        return;
-    }
-    Out << "  break;\n";
+  if(!I.isConditional()){
+    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+    printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
     return;
   }
-  // SUSAN: emit if statement
-  if(ifBranches.find(dyn_cast<BranchInst>(&I)) != ifBranches.end()){
-    BasicBlock *brBB = I.getParent();
-    assert(I.isConditional() && "marked C-if isn't a conditional?\n");
-    // emit conditional
 
-    BasicBlock *trueStartBB = I.getSuccessor(0);
-    BasicBlock *falseStartBB = I.getSuccessor(1);
-
-
-    //If structure 1 : on one branch the successor is pd of the branch block
-    //If structure 2 : one branch is branching to a basic block that has return stmt
-    bool exitTrueBr = isExitingFunction(trueStartBB);
-
-    bool exitFalseBr = isExitingFunction(falseStartBB);
-
-    bool trueBrOnly = (PDT->dominates(falseStartBB, brBB)
-                      && !isPotentiallyReachable(trueStartBB, brBB))
-                      || (exitTrueBr && !exitFalseBr);
-    bool falseBrOnly = (PDT->dominates(trueStartBB, brBB)
-                       && !isPotentiallyReachable(trueStartBB, brBB))
-                       || (exitFalseBr && !exitTrueBr);
-
-    if(falseBrOnly){
-      errs() << "SUSAN: false branch only!!!" << *brBB << "\n";
-      Out << "  if (!";
-      writeOperand(I.getCondition(), ContextCasted);
-      Out << ") {\n";
-    } else {
-      Out << "  if (";
-      writeOperand(I.getCondition(), ContextCasted);
-      Out << ") {\n";
+  BasicBlock *exitingBB = I.getParent();
+  BasicBlock *exitLoopTrueBB = nullptr;
+  BasicBlock *exitLoopFalseBB = nullptr;
+  for(unsigned int i_succ = 0; i_succ<I.getNumSuccessors(); ++i_succ){
+    BasicBlock *exitBB = I.getSuccessor(i_succ);
+    for(auto edge : irregularLoopExits){
+      if(edge.first == exitingBB && edge.second == exitBB){
+        if(i_succ==0) exitLoopTrueBB = exitBB;
+        else if(i_succ==1) exitLoopFalseBB = exitBB;
+      }
     }
+  }
+
+  //Print condition
+  BasicBlock *brBB = I.getParent();
+  //If structure 1 : on one branch the successor is pd of the branch block
+  //If structure 2 : one branch is branching to a basic block that has return stmt
+  BasicBlock *trueStartBB = I.getSuccessor(0);
+  BasicBlock *falseStartBB = I.getSuccessor(1);
+
+  bool exitFunctionTrueBr = isExitingFunction(trueStartBB);
+  bool exitFunctionFalseBr = isExitingFunction(falseStartBB);
+
+  bool trueBrOnly = (isPotentiallyReachable(trueStartBB,falseStartBB)
+                     && !isPotentiallyReachable(trueStartBB, brBB));
+  bool falseBrOnly = (isPotentiallyReachable(falseStartBB,trueStartBB)
+                     && !isPotentiallyReachable(falseStartBB, brBB));
+
+  if(!trueBrOnly && !falseBrOnly){
+    trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
+    falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
+  }
+
+  if(falseBrOnly){
+    errs() << "SUSAN: false branch only!!!" << *brBB << "\n";
+    Out << "  if (!";
+    writeOperand(I.getCondition(), ContextCasted);
+    Out << ") {\n";
+  } else {
+    Out << "  if (";
+    writeOperand(I.getCondition(), ContextCasted);
+    Out << ") {\n";
+  }
 
 
+  // Print bodies
+  // Case 1: it is a irregular loop exit
+  if(exitLoopFalseBB || exitLoopTrueBB){
+        //print exitBB
+        BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
+        for (BasicBlock::iterator I = exitBB->begin();
+            cast<Instruction>(I) != exitBB->getTerminator();
+            ++I)
+          printInstruction(cast<Instruction>(I));
+        printedBBs.insert(exitBB);
+
+        // if succBB of exitBB is returning, don't print break, print return block
+        for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
+	        BasicBlock *retBB = *ret;
+          if(isa<ReturnInst>(retBB->getTerminator())){
+            printBasicBlock(retBB);
+            Out << "    }\n";
+            return;
+          }
+        }
+        Out << "    break;\n  }\n";
+        return;
+  }
+
+
+    //Case 2: only print if body
     if(trueBrOnly){
-      // Construct only true branch
+      errs() << "SUSAN: trueBrOnly!!\n" << *brBB << "\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(trueStartBB, brBB);
+      emitIfBlock(trueStartBB, brBB, falseStartBB);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
       if(ret && ret != trueStartBB){
@@ -4658,10 +4697,10 @@ void CWriter::visitBranchInst(BranchInst &I) {
         printBasicBlock(ret);
       }
     }
+    //Case 3: only print if body with reveresed case
     else if(falseBrOnly){
-      // Construct only false branch
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(falseStartBB, brBB);
+      emitIfBlock(falseStartBB, brBB, trueStartBB);
 
       BasicBlock *ret = isExitingFunction(falseStartBB);
       if(ret && ret != falseStartBB){
@@ -4669,53 +4708,48 @@ void CWriter::visitBranchInst(BranchInst &I) {
         printBasicBlock(ret);
       }
     }
+    //Case 4: print if & else;
     else{
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(trueStartBB, brBB);
+      emitIfBlock(trueStartBB, brBB, falseStartBB);
       Out << "  } else {\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(falseStartBB, brBB);
+      emitIfBlock(falseStartBB, brBB, trueStartBB);
     }
 
     Out << "}\n";
 
-
-
-    return;
-  }
-
-  CurInstr = &I;
-
-  if (I.isConditional()) {
-    if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(0))) {
-      Out << "  if (";
-      writeOperand(I.getCondition(), ContextCasted);
-      Out << ") {\n";
-
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
-      printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
-
-      if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(1))) {
-        Out << "  } else {\n";
-        printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
-        printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
-      }
-    } else {
-      // First goto not necessary, assume second one is...
-      Out << "  if (!";
-      writeOperand(I.getCondition(), ContextCasted);
-      Out << ") {\n";
-
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
-      printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
-    }
-
-    Out << "  }\n";
-  } else {
-    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
-    printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
-  }
   Out << "\n";
+
+ // if (I.isConditional()) {
+ //   if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(0))) {
+ //     Out << "  if (";
+ //     writeOperand(I.getCondition(), ContextCasted);
+ //     Out << ") {\n";
+
+ //     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
+ //     printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
+
+ //     if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(1))) {
+ //       Out << "  } else {\n";
+ //       printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+ //       printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+ //     }
+ //   } else {
+ //     // First goto not necessary, assume second one is...
+ //     Out << "  if (!";
+ //     writeOperand(I.getCondition(), ContextCasted);
+ //     Out << ") {\n";
+
+ //     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+ //     printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+ //   }
+
+ //   Out << "  }\n";
+ // } else {
+ //   printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+ //   printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
+ // }
 }
 
 // PHI nodes get copied into temporary values at the end of predecessor basic
