@@ -4231,15 +4231,15 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
 }
 
 void CWriter::printInstruction(Instruction *I){
-  Out << "  ";
-  if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
-    if (canDeclareLocalLate(*I)) {
-      printTypeName(Out, I->getType(), false) << ' ';
+    Out << "  ";
+    if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
+      if (canDeclareLocalLate(*I)) {
+        printTypeName(Out, I->getType(), false) << ' ';
+      }
+      Out << GetValueName(&*I) << " = ";
     }
-    Out << GetValueName(&*I) << " = ";
-  }
-  writeInstComputationInline(*I);
-  Out << ";\n";
+    writeInstComputationInline(*I);
+    Out << ";\n";
 }
 
 
@@ -4667,8 +4667,11 @@ void CWriter::visitBranchInst(BranchInst &I) {
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
         for (BasicBlock::iterator I = exitBB->begin();
             cast<Instruction>(I) != exitBB->getTerminator();
-            ++I)
-          printInstruction(cast<Instruction>(I));
+            ++I){
+          Instruction *II = cast<Instruction>(I);
+          if (!isInlinableInst(*II) && !isDirectAlloca(&*II))
+            printInstruction(II);
+        }
         printedBBs.insert(exitBB);
 
         // if succBB of exitBB is returning, don't print break, print return block
