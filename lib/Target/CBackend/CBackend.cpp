@@ -4604,6 +4604,39 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 }
 
 
+void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
+      std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
+
+  visited.insert(fromBB);
+  path.insert(fromBB);
+
+  if(fromBB == toBB){
+    if(path.find(avoidBB) == path.end())
+      foundPathWithoutC = true;
+  }
+  else{
+    for (auto succ = succ_begin(fromBB); succ != succ_end(fromBB); ++succ){
+      BasicBlock *succBB = *succ;
+      if(visited.find(succBB) == visited.end())
+        directPathFromAtoBwithoutC(succBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+    }
+  }
+  visited.erase(fromBB);
+}
+
+bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
+  std::set<BasicBlock*> visited;
+  std::set<BasicBlock*> path;
+  bool foundPathWithoutC = false;
+
+  if(!isPotentiallyReachable(fromBB, toBB)) return false;
+
+  if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
+
+  directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+  return foundPathWithoutC;
+}
+
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
@@ -4638,10 +4671,15 @@ void CWriter::visitBranchInst(BranchInst &I) {
   bool exitFunctionTrueBr = isExitingFunction(trueStartBB);
   bool exitFunctionFalseBr = isExitingFunction(falseStartBB);
 
-  bool trueBrOnly = (isPotentiallyReachable(trueStartBB,falseStartBB)
-                     && !isPotentiallyReachable(trueStartBB, brBB));
-  bool falseBrOnly = (isPotentiallyReachable(falseStartBB,trueStartBB)
-                     && !isPotentiallyReachable(falseStartBB, brBB));
+  //bool trueBrOnly =  isPotentiallyReachable(trueStartBB,falseStartBB)
+  //                   && !( isPotentiallyReachable(trueStartBB, brBB) &&
+  //                     isPotentiallyReachable(brBB, falseStartBB) );
+  //bool falseBrOnly = isPotentiallyReachable(falseStartBB,trueStartBB)
+  //                   && !( isPotentiallyReachable(falseStartBB, brBB) &&
+  //                     isPotentiallyReachable(brBB, trueStartBB) );
+
+  bool trueBrOnly = directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
+  bool falseBrOnly  = directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
 
   if(!trueBrOnly && !falseBrOnly){
     trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
