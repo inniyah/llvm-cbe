@@ -212,6 +212,17 @@ bool CWriter::isInlineAsm(Instruction &I) const {
     return false;
 }
 
+void markBBwithNumOfVisits(Function &F, std::map<BasicBlock*, int> &times2bePrinted){
+  for(auto &BB : F){
+    if(&BB == &(F.getEntryBlock())){
+      times2bePrinted[&BB] = 1;
+      continue;
+    }
+    std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
+    times2bePrinted[&BB] = preds.size();
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   // Do not codegen any 'available_externally' functions at all, they have
@@ -228,13 +239,17 @@ bool CWriter::runOnFunction(Function &F) {
 
   //SUSAN: preprocessings
   //1. mark all the irregular exits of a loop (break/return)
-  //2. node splitting on irregular graph
-  //3. identify branches that can be expressed as if statement
+  //2. find all the branches that can be expressed as if statement before split
+  //3. node splitting on irregular graph
+  //4. identify branches that can be expressed as if statement after split
+  //5. mark each basicblock its number of times to be printed
 
   std::set<BasicBlock*> visitedBBs;
   markLoopIrregularExits(F); //1
-  markIfBranches(F, &visitedBBs); NodeSplitting(F); PDT->recalculate(F); //2
-  markIfBranches(F, &visitedBBs); //3
+  markIfBranches(F, &visitedBBs); //2
+  //NodeSplitting(F); PDT->recalculate(F); //3
+  //markIfBranches(F, &visitedBBs); //4
+  markBBwithNumOfVisits(F, times2bePrinted); //5
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -4193,7 +4208,8 @@ void CWriter::printFunction(Function &F) {
       }
     } else {
       printBasicBlock(&*BB);
-      printedBBs.insert(&*BB);
+      times2bePrinted[&*BB]--;
+      //printedBBs.insert(&*BB);
     }
   }
 
@@ -4306,7 +4322,8 @@ void CWriter::printLoopNew(Loop *L) {
     if(BB != L->getHeader ()){
       if (BBLoop == L){
         printBasicBlock(BB);
-        printedBBs.insert(BB);
+        times2bePrinted[BB]--;
+        //printedBBs.insert(BB);
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
         printLoopNew(BBLoop);
@@ -4332,7 +4349,8 @@ void CWriter::printLoop(Loop *L) {
     Loop *BBLoop = LI->getLoopFor(BB);
     if (BBLoop == L){
       printBasicBlock(BB);
-      printedBBs.insert(BB);
+      times2bePrinted[BB]--;
+      //printedBBs.insert(BB);
     }
     else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
       printLoop(BBLoop);
@@ -4342,10 +4360,14 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
-  if(printedBBs.find(BB) != printedBBs.end()){
+  if(!times2bePrinted[BB]){
     //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
   }
+  //if(printedBBs.find(BB) != printedBBs.end()){
+    //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
+    //return;
+  //}
   // Don't print the label for the basic block if there are no uses, or if
   // the only terminator use is the predecessor basic block's terminator.
   // We have to scan the use list because PHI nodes use basic blocks too but
@@ -4545,6 +4567,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     visited.insert(start);
     toVisit.push(start);
 
+
     while(!toVisit.empty()){
       BasicBlock *currBB = toVisit.front();
 
@@ -4552,31 +4575,34 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
       // currently just adding patches here and there
       // e.x.,: currBB == otherStart is added from supermutation
       if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
-        //errs() << "found post dominator" << *currBB << "\n";
         break;
       }
 
       // splitted blocks, their controled blocks can be printed >1 times
       bool printLabel = true;
       if(splittedBBs.find(brBlock) != splittedBBs.end()){
-        printedBBs.erase(currBB);
+        //printedBBs.erase(currBB);
         printLabel = false;
       }
 
-      if(printedBBs.find(currBB) != printedBBs.end()){
-        //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+      if(!times2bePrinted[currBB]){
+        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
         toVisit.pop();
         continue;
       }
+      //if(printedBBs.find(currBB) != printedBBs.end()){
+        //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+        //toVisit.pop();
+        //continue;
+      //}
 
       printBasicBlock(currBB, printLabel);
-
-      printedBBs.insert(currBB);
+      times2bePrinted[currBB]--;
+      //printedBBs.insert(currBB);
 
       toVisit.pop();
 
-      for (auto succ = succ_begin(currBB);
-           succ != succ_end(currBB); ++succ){
+      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
           BasicBlock *succBB = *succ;
           if(visited.find(succBB)==visited.end()){
             visited.insert(succBB);
@@ -4629,9 +4655,7 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
   std::set<BasicBlock*> path;
   bool foundPathWithoutC = false;
 
-  if(!isPotentiallyReachable(fromBB, toBB)) return false;
-
-  if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
+  //if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
 
   directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
   return foundPathWithoutC;
@@ -4642,6 +4666,7 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 void CWriter::visitBranchInst(BranchInst &I) {
   CurInstr = &I;
 
+  errs() << "SUSAN: current branch:" << I << "\n";
   if(!I.isConditional()){
     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
@@ -4678,8 +4703,10 @@ void CWriter::visitBranchInst(BranchInst &I) {
   //                   && !( isPotentiallyReachable(falseStartBB, brBB) &&
   //                     isPotentiallyReachable(brBB, trueStartBB) );
 
-  bool trueBrOnly = directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
-  bool falseBrOnly  = directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
+  bool trueBrOnly = PDT->dominates(falseStartBB, trueStartBB) &&
+                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
+  bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
+                      directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
 
   if(!trueBrOnly && !falseBrOnly){
     trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
@@ -4687,7 +4714,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
   }
 
   if(falseBrOnly){
-    errs() << "SUSAN: false branch only!!!" << *brBB << "\n";
     Out << "  if (!";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
@@ -4701,6 +4727,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
   // Print bodies
   // Case 1: it is a irregular loop exit
   if(exitLoopFalseBB || exitLoopTrueBB){
+      errs() << "SUSAN: exiting loop:" << *brBB << "\n";
         //print exitBB
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
         for (BasicBlock::iterator I = exitBB->begin();
@@ -4710,7 +4737,8 @@ void CWriter::visitBranchInst(BranchInst &I) {
           if (!isInlinableInst(*II) && !isDirectAlloca(&*II))
             printInstruction(II);
         }
-        printedBBs.insert(exitBB);
+        times2bePrinted[exitBB]--;
+        //printedBBs.insert(exitBB);
 
         // if succBB of exitBB is returning, don't print break, print return block
         for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
