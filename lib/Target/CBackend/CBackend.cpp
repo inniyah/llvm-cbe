@@ -4775,6 +4775,13 @@ void CWriter::visitBranchInst(BranchInst &I) {
         times2bePrinted[exitBB]--;
         //printedBBs.insert(exitBB);
 
+        // if exitBB is returning, then don't print break, directly print ret instruction
+        if(isa<ReturnInst>(exitBB->getTerminator())){
+          printInstruction(exitBB->getTerminator());
+          Out << "    }\n";
+          return;
+        }
+
         // if succBB of exitBB is returning, don't print break, print return block
         for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
 	        BasicBlock *retBB = *ret;
@@ -4785,6 +4792,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
             return;
           }
         }
+
         Out << "    break;\n  }\n";
         return;
   }
