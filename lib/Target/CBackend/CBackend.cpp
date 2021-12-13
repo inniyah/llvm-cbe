@@ -4310,6 +4310,7 @@ void CWriter::printLoopNew(Loop *L) {
   }
   else{
     Out << "while(1){\n";
+    printPHICopiesForAllPhis(L->getHeader(), 0);
     printBasicBlock(L->getHeader());
   }
 
@@ -4531,6 +4532,40 @@ bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
   return false;
 }
 
+void CWriter::printPHICopiesForAllPhis(BasicBlock *CurBlock,
+                                        unsigned Indent) {
+  std::queue<BasicBlock*> toVisit;
+  std::set<BasicBlock*> visited;
+  toVisit.push(CurBlock);
+  visited.insert(CurBlock);
+  while(!toVisit.empty()){
+	  BasicBlock *currBB = toVisit.front();
+	  toVisit.pop();
+	  for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+		  BasicBlock *succBB = *succ;
+		  if(visited.find(succBB)==visited.end()){
+
+        //print phi value for the successors
+        for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
+          PHINode *PN = cast<PHINode>(I);
+          if(PN->getBasicBlockIndex(CurBlock) >= 0){
+            // Now we have to do the printing.
+            Value *IV = PN->getIncomingValueForBlock(CurBlock);
+            if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
+              Out << std::string(Indent, ' ');
+              Out << "  " << GetValueName(&*I) << "__PHI_TEMPORARY = ";
+              writeOperand(IV, ContextCasted);
+              Out << ";   /* for PHI node */\n";
+            }
+          }
+        }
+
+			  visited.insert(succBB);
+			  toVisit.push(succBB);
+		  }
+	  }
+  }
+}
 void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
                                          BasicBlock *Successor,
                                          unsigned Indent) {
@@ -4744,6 +4779,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
         for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
 	        BasicBlock *retBB = *ret;
           if(isa<ReturnInst>(retBB->getTerminator())){
+            printPHICopiesForSuccessor(exitBB, retBB, 2);
             printBasicBlock(retBB);
             Out << "    }\n";
             return;

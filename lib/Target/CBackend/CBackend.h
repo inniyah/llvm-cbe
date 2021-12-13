@@ -62,7 +62,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<StringRef,std::set<Instruction*>>Var2IRs;
   std::map<Instruction*, std::set<StringRef>>IR2vars;
   std::set<StringRef>allVars, phiVars;
-  std::set<BasicBlock*>printedBBs;
+  //std::set<BasicBlock*>printedBBs;
+  std::map<BasicBlock*, int> times2bePrinted;
   std::set<BasicBlock*> splittedBBs;
   std::set<Instruction*> declaredInsts;
   std::set<std::pair<BasicBlock*, BasicBlock*>> irregularLoopExits;
@@ -269,6 +270,8 @@ private:
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
   void printCmpOperator(ICmpInst *icmp);
   void printInstruction(Instruction *I);
+  void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
+
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
