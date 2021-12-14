@@ -2506,6 +2506,59 @@ void CWriter::generateHeader(Module &M) {
       continue;
     printTypeName(NullOut, I->getType()->getElementType(), false);
   }
+
+  //collect function types that are arguments in the standard library calls
+  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
+    Function* func = &*I;
+    errs() << "SUSAN: function:" << *func << "\n";
+    std::pair<AttributeList, CallingConv::ID> Attrs = std::make_pair(func->getAttributes(),
+                                                  func->getCallingConv());
+    AttributeList &PAL = Attrs.first;
+    FunctionType *FTy = func->getFunctionType();
+    bool isStructReturn = false;
+    isStructReturn = PAL.hasAttribute(1, Attribute::StructRet) ||
+                     PAL.hasAttribute(2, Attribute::StructRet);
+
+    // Get the return type for the function.
+    Type *RetTy;
+    if (!isStructReturn)
+      RetTy = FTy->getReturnType();
+    else {
+      // If this is a struct-return function, print the struct-return type.
+      RetTy = cast<PointerType>(FTy->getParamType(0))->getElementType();
+    }
+
+    // add return type to functionIDs if it's function type;
+    if(RetTy->getTypeID() == Type::FunctionTyID){
+      FunctionType *FTy = cast<FunctionType>(RetTy);
+      UnnamedFunctionIDs.getOrInsert(std::make_pair(FTy, Attrs));
+    }
+
+
+    // Get the argument types
+    FunctionType::param_iterator II = FTy->param_begin(), EE = FTy->param_end();
+    for (; II != EE; ++II) {
+      Type *ArgTy = *II;
+      errs() << "SUSAN: arg type: " << *ArgTy << "\n";
+      // add argument type to functionIDs if it's function type;
+      if(ArgTy->getTypeID() == Type::FunctionTyID){
+        FunctionType *FTy = cast<FunctionType>(ArgTy);
+        errs() << "SUSAN: funcTy in argument" << *FTy << "\n";
+        UnnamedFunctionIDs.getOrInsert(std::make_pair(FTy, Attrs));
+      }
+      else if(ArgTy->getTypeID() == Type::PointerTyID){
+        Type *ElTy = ArgTy->getPointerElementType();
+        if(FunctionType *FTy = dyn_cast<FunctionType>(ElTy)){
+          errs() << "SUSAN: funcTy in argument" << *FTy << "\n";
+          std::pair<AttributeList, CallingConv::ID> PAL_generic = std::make_pair(AttributeList(),
+                                                  CallingConv::C);
+          UnnamedFunctionIDs.getOrInsert(std::make_pair(FTy, PAL_generic));
+        }
+      }
+    }
+
+  }
+
   printModuleTypes(Out);
 
   // Global variable declarations...
@@ -3778,6 +3831,7 @@ void CWriter::printModuleTypes(raw_ostream &Out) {
     std::vector<FunctionType *> Dependencies;
     std::string NameToPrint;
   };
+
 
   std::vector<FunctionDefinition> FunctionTypeDefinitions;
   // Copy Function Types into indexable container
