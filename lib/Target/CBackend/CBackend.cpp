@@ -4502,6 +4502,8 @@ void CWriter::visitReturnInst(ReturnInst &I) {
 
 void CWriter::visitSwitchInst(SwitchInst &SI) {
   CurInstr = &SI;
+  BasicBlock *switchBB = SI.getParent();
+
 
   Value *Cond = SI.getCondition();
   unsigned NumBits = cast<IntegerType>(Cond->getType())->getBitWidth();
@@ -4516,7 +4518,8 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
     writeOperand(Cond);
     Out << ") {\n  default:\n";
     printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
-    printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
+    emitSwitchBlock(SI.getDefaultDest(), switchBB);
+    Out << "    break;\n";
 
     // Skip the first item since that's the default case.
     for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e;
@@ -4527,10 +4530,8 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
       writeOperand(CaseVal);
       Out << ":\n";
       printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
-      if (isGotoCodeNecessary(SI.getParent(), Succ))
-        printBranchToBlock(SI.getParent(), Succ, 2);
-      else
-        Out << "    break;\n";
+      emitSwitchBlock(Succ, switchBB);
+      Out << "    break;\n";
     }
     Out << "  }\n";
 
@@ -4645,6 +4646,42 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
     writeOperand(Succ);
     Out << ";\n";
   }
+}
+
+void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
+    std::set<BasicBlock*> visited;
+    std::queue<BasicBlock*> toVisit;
+    visited.insert(start);
+    toVisit.push(start);
+    while(!toVisit.empty()){
+      BasicBlock *currBB = toVisit.front();
+
+      // TODO: need a systematic way to check when does a branch end
+      // currently just adding patches here and there
+      // e.x.,: currBB == otherStart is added from supermutation
+      if(PDT->dominates(currBB, brBlock)){
+        break;
+      }
+
+      if(!times2bePrinted[currBB]){
+        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+        toVisit.pop();
+        continue;
+      }
+
+      printBasicBlock(currBB);
+      times2bePrinted[currBB]--;
+
+      toVisit.pop();
+
+      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+          BasicBlock *succBB = *succ;
+          if(visited.find(succBB)==visited.end()){
+            visited.insert(succBB);
+            toVisit.push(succBB);
+          }
+      }
+    }
 }
 
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart){

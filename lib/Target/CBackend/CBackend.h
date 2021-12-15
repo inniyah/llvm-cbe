@@ -272,6 +272,7 @@ private:
   void printCmpOperator(ICmpInst *icmp);
   void printInstruction(Instruction *I);
   void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
+  void emitSwitchBlock(BasicBlock* start, BasicBlock *brBlockk);
 
 
   void writeOperandDeref(Value *Operand);
