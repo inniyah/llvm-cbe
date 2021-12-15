@@ -4711,6 +4711,9 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
   if(term->getNumSuccessors() > 1)
     return nullptr;
 
+  if(isa<UnreachableInst>(term))
+    return bb;
+
   BasicBlock *succ = term->getSuccessor(0);
   Instruction *ret = succ->getTerminator();
 
