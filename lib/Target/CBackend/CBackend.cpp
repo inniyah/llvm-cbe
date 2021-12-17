@@ -5074,12 +5074,46 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
       writeOperand(X, ContextCasted);
     } else {
       opcode = I.getOpcode();
-      Out << "llvm_" << Instruction::getOpcodeName(opcode) << "_";
-      printTypeString(Out, VTy, false);
-      Out << "(";
-      writeOperand(I.getOperand(0), ContextCasted);
-      Out << ", ";
-      writeOperand(I.getOperand(1), ContextCasted);
+      if(opcode == Instruction::Add || opcode == Instruction::FAdd){
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " + ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::Mul || opcode == Instruction::FMul){
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " * ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::URem || opcode == Instruction::SRem
+              || opcode == Instruction::FRem){
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " % ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::Sub || opcode == Instruction::FSub){
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " - ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::UDiv || opcode == Instruction::SDiv
+              || opcode == Instruction::FDiv){
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " / ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else{
+        Out << "llvm_" << Instruction::getOpcodeName(opcode) << "_";
+        printTypeString(Out, VTy, false);
+        Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << ", ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
     }
     Out << ")";
     InlineOpDeclTypes.insert(std::pair<unsigned, Type *>(opcode, VTy));
