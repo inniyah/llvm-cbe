@@ -3588,13 +3588,24 @@ void CWriter::markLoopIrregularExits(Function &F){
 
 }
 
-bool headerIsExiting (Loop *L){
+bool headerIsExiting (Loop *L, BranchInst* brInst = nullptr){
+  if(!brInst){
+    BasicBlock *header = L->getHeader();
+    Instruction* term = header->getTerminator();
+    brInst = dyn_cast<BranchInst>(term);
+    assert(brInst && brInst->isConditional() &&
+      "exit condition is not a conditional branch inst?");
+  }
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
-    if(exit == L->getHeader())
-      return true;
+    if(exit == L->getHeader()){
+      if(isa<CmpInst>(brInst->getOperand(0)) ||
+         isa<ICmpInst>(brInst->getOperand(0)))
+        return true;
+      else return false;
+    }
   }
   return false;
 }
@@ -4323,20 +4334,24 @@ void CWriter::printLoopNew(Loop *L) {
 
   std::vector<Instruction*> exitConditionUpdates;
 
-  CmpInst *cmp;
+  BasicBlock *header = L->getHeader();
+  Instruction* term = header->getTerminator();
+  BranchInst* brInst = dyn_cast<BranchInst>(term);
+  assert(brInst && brInst->isConditional() &&
+      "exit condition is not a conditional branch inst?");
+
+  bool headerExiting = headerIsExiting(L, brInst);
   // print compare statement
-  if(headerIsExiting(L)){
-    BasicBlock *exit = L->getHeader();
-    Instruction* term = exit->getTerminator();
-    BranchInst* brInst = dyn_cast<BranchInst>(term);
-    assert(brInst && brInst->isConditional() &&
-        "exit condition is not a conditional branch inst?");
-    cmp = dyn_cast<CmpInst>(brInst->getOperand(0));
-    assert(cmp && "exit condition isn't gotten from a cmpInst?\n");
-    ICmpInst *icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
+  if(headerExiting){
+    //search for exit loop condition
+    ICmpInst *icmp;
+    if(CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0)))
+      icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
+    else icmp = dyn_cast<ICmpInst>(brInst->getOperand(0));
 
     // print live-in declarations
-    for (BasicBlock::iterator I = exit->begin(); cast<Instruction>(I) !=  cmp; ++I) {
+    Instruction *condInst = dyn_cast<Instruction>(brInst->getOperand(0));
+    for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
       Instruction *inst = cast<Instruction>(I);
       if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
          Out << "  ";
@@ -4348,8 +4363,8 @@ void CWriter::printLoopNew(Loop *L) {
     }
 
     // print prologue
-    for (BasicBlock::iterator I = exit->begin();
-         cast<Instruction>(I) !=  cmp && I != exit->end();
+    for (BasicBlock::iterator I = header->begin();
+         cast<Instruction>(I) !=  condInst && I != header->end();
          ++I)
       printInstruction(cast<Instruction>(I));
 
@@ -4364,8 +4379,8 @@ void CWriter::printLoopNew(Loop *L) {
   }
   else{
     Out << "while(1){\n";
-    printPHICopiesForAllPhis(L->getHeader(), 0);
-    printBasicBlock(L->getHeader());
+    printPHICopiesForAllPhis(header, 0);
+    printBasicBlock(header);
   }
 
   // print loop body
@@ -4385,12 +4400,14 @@ void CWriter::printLoopNew(Loop *L) {
     }
   }
 
-  if(headerIsExiting(L))
-   for (BasicBlock::iterator I = L->getHeader()->begin();
-        cast<Instruction>(I) !=  cmp && I != L->getHeader()->end();
+  if(headerExiting){
+    Instruction *condInst = dyn_cast<Instruction>(brInst->getOperand(0));
+    for (BasicBlock::iterator I = L->getHeader()->begin();
+        cast<Instruction>(I) !=  condInst && I != L->getHeader()->end();
         ++I){
-     printInstruction(cast<Instruction>(I));
-   }
+      printInstruction(cast<Instruction>(I));
+    }
+  }
 
   Out << "}\n";
 
