@@ -5093,10 +5093,28 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::SRem){
-        Out << "((int)";
+        Type* op0Ty = (I.getOperand(0))->getType();
+        Type* op1Ty = (I.getOperand(1))->getType();
+        if(op0Ty->isIntegerTy(32))
+          Out << "((int)";
+        else if(op0Ty->isIntegerTy(64))
+          Out << "((long long)";
+        else if(op0Ty->isFloatTy())
+          Out << "((float)";
+        else if(op0Ty->isDoubleTy())
+          Out << "((double)";
+        else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " % ";
-        Out << "(int)";
+        if(op1Ty->isIntegerTy(32))
+          Out << "(int)";
+        else if(op1Ty->isIntegerTy(64))
+          Out << "(long long)";
+        else if(op1Ty->isFloatTy())
+          Out << "(float)";
+        else if(op1Ty->isDoubleTy())
+          Out << "(double)";
+        else assert(0 && "SUSAN: op1Ty unimplemented cast?\n");
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::Sub || opcode == Instruction::FSub){
@@ -5112,10 +5130,28 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::SDiv){
-        Out << "((int)";
+        Type* op0Ty = (I.getOperand(0))->getType();
+        Type* op1Ty = (I.getOperand(1))->getType();
+        if(op0Ty->isIntegerTy(32))
+          Out << "((int)";
+        else if(op0Ty->isIntegerTy(64))
+          Out << "((long long)";
+        else if(op0Ty->isFloatTy())
+          Out << "((float)";
+        else if(op0Ty->isDoubleTy())
+          Out << "((double)";
+        else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
-        Out << "(int)";
+        if(op1Ty->isIntegerTy(32))
+          Out << "(int)";
+        else if(op1Ty->isIntegerTy(64))
+          Out << "(long long)";
+        else if(op1Ty->isFloatTy())
+          Out << "(float)";
+        else if(op1Ty->isDoubleTy())
+          Out << "(double)";
+        else assert(0 && "SUSAN: op1Ty unimplemented cast?\n");
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else{
