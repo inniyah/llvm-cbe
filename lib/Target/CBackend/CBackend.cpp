@@ -5086,11 +5086,17 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         Out << " * ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
-      else if(opcode == Instruction::URem || opcode == Instruction::SRem
-              || opcode == Instruction::FRem){
+      else if(opcode == Instruction::URem || opcode == Instruction::FRem){
         Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " % ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::SRem){
+        Out << "((int)";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " % ";
+        Out << "(int)";
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::Sub || opcode == Instruction::FSub){
@@ -5099,11 +5105,17 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         Out << " - ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
-      else if(opcode == Instruction::UDiv || opcode == Instruction::SDiv
-              || opcode == Instruction::FDiv){
+      else if(opcode == Instruction::UDiv || opcode == Instruction::FDiv){
         Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::SDiv){
+        Out << "((int)";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " / ";
+        Out << "(int)";
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else{
