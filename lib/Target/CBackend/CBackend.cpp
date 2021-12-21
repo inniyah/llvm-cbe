@@ -4342,8 +4342,8 @@ void CWriter::printLoopNew(Loop *L) {
   bool headerExiting = headerIsExiting(L, brInst);
   // print compare statement
   if(headerExiting){
-    assert(brInst && brInst->isConditional() &&
-      "exit condition is not a conditional branch inst?");
+  //  assert(brInst && brInst->isConditional() &&
+  //    "exit condition is not a conditional branch inst?");
     //search for exit loop condition
     ICmpInst *icmp;
     if(CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0)))
