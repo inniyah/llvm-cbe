@@ -5057,38 +5057,44 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     Value *X;
     if (match(&I, m_Neg(m_Value(X)))) {
       opcode = BinaryNeg;
-      Out << "llvm_neg_";
-      printTypeString(Out, VTy, false);
-      Out << "(";
+      //Out << "llvm_neg_";
+      //printTypeString(Out, VTy, false);
+      //Out << "(";
+      //writeOperand(X, ContextCasted);
+      Out << "-";
       writeOperand(X, ContextCasted);
     } else if (match(&I, m_FNeg(m_Value(X)))) {
       opcode = BinaryNeg;
-      Out << "llvm_neg_";
-      printTypeString(Out, VTy, false);
-      Out << "(";
+      //Out << "llvm_neg_";
+      //printTypeString(Out, VTy, false);
+      //Out << "(";
+      //writeOperand(X, ContextCasted);
+      Out << "-";
       writeOperand(X, ContextCasted);
     } else if (match(&I, m_Not(m_Value(X)))) {
       opcode = BinaryNot;
-      Out << "llvm_not_";
-      printTypeString(Out, VTy, false);
-      Out << "(";
+      //Out << "llvm_not_";
+      //printTypeString(Out, VTy, false);
+      //Out << "(";
+      //writeOperand(X, ContextCasted);
+      Out << "~";
       writeOperand(X, ContextCasted);
     } else {
       opcode = I.getOpcode();
       if(opcode == Instruction::Add || opcode == Instruction::FAdd){
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " + ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::Mul || opcode == Instruction::FMul){
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " * ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::URem || opcode == Instruction::FRem){
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " % ";
         writeOperand(I.getOperand(1), ContextCasted);
@@ -5097,13 +5103,13 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         Type* op0Ty = (I.getOperand(0))->getType();
         Type* op1Ty = (I.getOperand(1))->getType();
         if(op0Ty->isIntegerTy(32))
-          Out << "((int)";
+          Out << "(int)";
         else if(op0Ty->isIntegerTy(64))
-          Out << "((long long)";
+          Out << "(long long)";
         else if(op0Ty->isFloatTy())
-          Out << "((float)";
+          Out << "(float)";
         else if(op0Ty->isDoubleTy())
-          Out << "((double)";
+          Out << "(double)";
         else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " % ";
@@ -5119,13 +5125,13 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::Sub || opcode == Instruction::FSub){
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " - ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::UDiv || opcode == Instruction::FDiv){
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
         writeOperand(I.getOperand(1), ContextCasted);
@@ -5134,13 +5140,13 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         Type* op0Ty = (I.getOperand(0))->getType();
         Type* op1Ty = (I.getOperand(1))->getType();
         if(op0Ty->isIntegerTy(32))
-          Out << "((int)";
+          Out << "(int)";
         else if(op0Ty->isIntegerTy(64))
-          Out << "((long long)";
+          Out << "(long long)";
         else if(op0Ty->isFloatTy())
-          Out << "((float)";
+          Out << "(float)";
         else if(op0Ty->isDoubleTy())
-          Out << "((double)";
+          Out << "(double)";
         else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
@@ -5155,16 +5161,46 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         else assert(0 && "SUSAN: op1Ty unimplemented cast?\n");
         writeOperand(I.getOperand(1), ContextCasted);
       }
+      else if(opcode == Instruction::LShr || opcode == Instruction::AShr){
+        //Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " >> ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::Shl){
+        //Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " << ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::Xor){
+        //Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " ^ ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::Or){
+        //Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " | ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
+      else if(opcode == Instruction::And){
+        //Out << "(";
+        writeOperand(I.getOperand(0), ContextCasted);
+        Out << " & ";
+        writeOperand(I.getOperand(1), ContextCasted);
+      }
       else{
         Out << "llvm_" << Instruction::getOpcodeName(opcode) << "_";
         printTypeString(Out, VTy, false);
-        Out << "(";
+        //Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << ", ";
         writeOperand(I.getOperand(1), ContextCasted);
       }
     }
-    Out << ")";
+    //Out << ")";
     InlineOpDeclTypes.insert(std::pair<unsigned, Type *>(opcode, VTy));
     return;
   }
