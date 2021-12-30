@@ -382,6 +382,7 @@ private:
   void printBranchToBlock(BasicBlock *CurBlock, BasicBlock *SuccBlock,
                           unsigned Indent);
   void printGEPExpression(Value *Ptr, gep_type_iterator I, gep_type_iterator E);
+  void printGEPExpressionOld(Value *Ptr, gep_type_iterator I, gep_type_iterator E);
 
   std::string GetValueName(Value *Operand);
 
