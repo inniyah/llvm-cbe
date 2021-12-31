@@ -6404,7 +6404,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
       LastIndexIsVector = dyn_cast<VectorType>(TmpI.getIndexedType());
   }
 
-  Out << "(";
+  //Out << "(";
 
   // If the last index is into a vector, we can't print it as &a[i][j] because
   // we can't index into a vector with j in GCC.  Instead, emit this as
@@ -6418,7 +6418,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
-  Out << '&';
+  //Out << '&';
 
   Type *IntoT = I.getIndexedType();
 
@@ -6477,7 +6477,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
           Out << ')';
         }
       } else {
-        Out << ".array[";
+        Out << "[";
         writeOperandWithCast(Opnd, Instruction::GetElementPtr);
         Out << ']';
       }
@@ -6499,12 +6499,17 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
 
     IntoT = I.getIndexedType();
   }
-  Out << ")";
+  //Out << ")";
 }
 
 void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
                                 bool IsVolatile, unsigned Alignment /*bytes*/) {
   if (isAddressExposed(Operand) && !IsVolatile) {
+    writeOperandInternal(Operand);
+    return;
+  }
+
+  if (isa<GetElementPtrInst>(Operand)){
     writeOperandInternal(Operand);
     return;
   }
