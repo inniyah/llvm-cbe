@@ -6387,7 +6387,7 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 }
 
 void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
-                                 gep_type_iterator E) {
+                                 gep_type_iterator E,  bool printIndex) {
 
   // If there are no indices, just print out the pointer.
   if (I == E) {
@@ -6452,6 +6452,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     }
   }
 
+  if(printIndex){
   for (; I != E; ++I) {
     Value *Opnd = I.getOperand();
 
@@ -6499,6 +6500,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
 
     IntoT = I.getIndexedType();
   }
+  }
   //Out << ")";
 }
 
@@ -6510,6 +6512,7 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   }
 
   if (isa<GetElementPtrInst>(Operand)){
+    printGEPIndex.insert(Operand);
     writeOperandInternal(Operand);
     return;
   }
@@ -6601,7 +6604,9 @@ void CWriter::visitFenceInst(FenceInst &I) {
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
 
-  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I));
+  bool printIndex = false;
+  if(printGEPIndex.find(&I) != printGEPIndex.end()) printIndex = true;
+  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), printIndex);
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
