@@ -6514,6 +6514,7 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   if (isa<GetElementPtrInst>(Operand)){
     printGEPIndex.insert(Operand);
     writeOperandInternal(Operand);
+    printGEPIndex.erase(Operand);
     return;
   }
 
