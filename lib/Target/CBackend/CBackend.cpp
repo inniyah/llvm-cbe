@@ -607,7 +607,9 @@ CWriter::printTypeName(raw_ostream &Out, Type *Ty, bool isSigned,
 
   case Type::ArrayTyID: {
     TypedefDeclTypes.insert(Ty);
-    return Out << getArrayName(cast<ArrayType>(Ty));
+    Type *elTy = Ty->getArrayElementType();
+    return printTypeName(Out, elTy, false);
+    //return Out << getArrayName(cast<ArrayType>(Ty));
   }
 #if LLVM_VERSION_MAJOR > 10
   case Type::FixedVectorTyID:
@@ -1495,7 +1497,8 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       Out << "(";
       Context = ContextCasted;
     } else {
-      Out << "{ { "; // Arrays are wrapped in struct types.
+      Out << "{ "; // Arrays are wrapped in struct types.
+      //SUSAN: not wrapped in struct any more
     }
     if (ConstantArray *CA = dyn_cast<ConstantArray>(CPV)) {
       printConstantArray(CA, Context);
@@ -1512,7 +1515,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       }
     }
     Out << (Context == ContextStatic
-                ? " } }"
+                ? " }"
                 : ")"); // Arrays are wrapped in struct types.
     break;
   }
@@ -3504,32 +3507,38 @@ void CWriter::declareOneGlobalVariable(GlobalVariable *I) {
     Out << "__thread ";
 
   Type *ElTy = I->getType()->getElementType();
-  unsigned Alignment = I->getAlignment();
-  bool IsOveraligned = Alignment && Alignment > TD->getABITypeAlignment(ElTy);
-  if (IsOveraligned) {
-    headerUseMsAlign();
-    Out << "__MSALIGN__(" << Alignment << ") ";
-  }
+ // unsigned Alignment = I->getAlignment();
+ // bool IsOveraligned = Alignment && Alignment > TD->getABITypeAlignment(ElTy);
+ // if (IsOveraligned) {
+ //   headerUseMsAlign();
+ //   Out << "__MSALIGN__(" << Alignment << ") ";
+ // }
+ // printTypeNameForAddressableValue(Out, ElTy, false);
+ // Out << ' ' << GetValueName(I);
+ // if (IsOveraligned)
+ //   Out << " __attribute__((aligned(" << Alignment << ")))";
+
+ // if (I->hasLinkOnceLinkage())
+ //   Out << " __attribute__((common))";
+ // else if (I->hasWeakLinkage()) {
+ //   headerUseAttributeWeak();
+ //   Out << " __ATTRIBUTE_WEAK__";
+ // } else if (I->hasCommonLinkage()) {
+ //   headerUseAttributeWeak();
+ //   Out << " __ATTRIBUTE_WEAK__";
+ // }
+
+ // if (I->hasHiddenVisibility()) {
+ //   headerUseHidden();
+ //   Out << " __HIDDEN__";
+ // }
+
   printTypeNameForAddressableValue(Out, ElTy, false);
   Out << ' ' << GetValueName(I);
-  if (IsOveraligned)
-    Out << " __attribute__((aligned(" << Alignment << ")))";
-
-  if (I->hasLinkOnceLinkage())
-    Out << " __attribute__((common))";
-  else if (I->hasWeakLinkage()) {
-    headerUseAttributeWeak();
-    Out << " __ATTRIBUTE_WEAK__";
-  } else if (I->hasCommonLinkage()) {
-    headerUseAttributeWeak();
-    Out << " __ATTRIBUTE_WEAK__";
+  if(isa<ArrayType>(ElTy)){
+    ArrayType* arrayTy = dyn_cast<ArrayType>(ElTy);
+    Out << "[" << arrayTy->getNumElements() << "]";
   }
-
-  if (I->hasHiddenVisibility()) {
-    headerUseHidden();
-    Out << " __HIDDEN__";
-  }
-
   // If the initializer is not null, emit the initializer.  If it is null,
   // we try to avoid emitting large amounts of zeros.  The problem with
   // this, however, occurs when the variable has weak linkage.  In this
