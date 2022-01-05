@@ -168,7 +168,7 @@ bool CWriter::isAddressExposed(Value *V) const {
 bool CWriter::isInlinableInst(Instruction &I) const {
   // Always inline cmp instructions, even if they are shared by multiple
   // expressions.  GCC generates horrible code if we don't.
-  if (isa<CmpInst>(I))
+  if (isa<CmpInst>(I) || isa<GetElementPtrInst>(I))
     return true;
 
   // Must be an expression, must be used exactly once.  If it is dead, we
@@ -1791,8 +1791,9 @@ void CWriter::writeOperandInternal(Value *Operand,
 
   Constant *CPV = dyn_cast<Constant>(Operand);
 
-  if (CPV && !isa<GlobalValue>(CPV))
+  if (CPV && !isa<GlobalValue>(CPV)){
     printConstant(CPV, Context);
+  }
   else
     Out << GetValueName(Operand);
 }
@@ -2513,7 +2514,6 @@ void CWriter::generateHeader(Module &M) {
   //collect function types that are arguments in the standard library calls
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
     Function* func = &*I;
-    errs() << "SUSAN: function:" << *func << "\n";
     std::pair<AttributeList, CallingConv::ID> Attrs = std::make_pair(func->getAttributes(),
                                                   func->getCallingConv());
     AttributeList &PAL = Attrs.first;
@@ -2542,17 +2542,14 @@ void CWriter::generateHeader(Module &M) {
     FunctionType::param_iterator II = FTy->param_begin(), EE = FTy->param_end();
     for (; II != EE; ++II) {
       Type *ArgTy = *II;
-      errs() << "SUSAN: arg type: " << *ArgTy << "\n";
       // add argument type to functionIDs if it's function type;
       if(ArgTy->getTypeID() == Type::FunctionTyID){
         FunctionType *FTy = cast<FunctionType>(ArgTy);
-        errs() << "SUSAN: funcTy in argument" << *FTy << "\n";
         UnnamedFunctionIDs.getOrInsert(std::make_pair(FTy, Attrs));
       }
       else if(ArgTy->getTypeID() == Type::PointerTyID){
         Type *ElTy = ArgTy->getPointerElementType();
         if(FunctionType *FTy = dyn_cast<FunctionType>(ElTy)){
-          errs() << "SUSAN: funcTy in argument" << *FTy << "\n";
           std::pair<AttributeList, CallingConv::ID> PAL_generic = std::make_pair(AttributeList(),
                                                   CallingConv::C);
           UnnamedFunctionIDs.getOrInsert(std::make_pair(FTy, PAL_generic));
@@ -3575,7 +3572,6 @@ void CWriter::markLoopIrregularExits(Function &F){
     Loop *L = loops.front();
     loops.pop_front();
 
-    errs() << "SUSAN: print loop:" << *L << "\n";
     SmallVector< BasicBlock*, 8> ExitBlocks, ExitingBlocks;
     SmallVector<std::pair<BasicBlock *, BasicBlock *>, 8> ExitEdges;
     L->getExitBlocks(ExitBlocks);
@@ -3585,7 +3581,6 @@ void CWriter::markLoopIrregularExits(Function &F){
       BasicBlock *exitingBB = edge.first;
       BasicBlock *exitBB = edge.second;
       if(exitingBB != L->getHeader()){
-        errs() << "SUSAN: irregular exit from bb:" << *exitingBB << "\nto BB:" << *exitBB << "\n";
         irregularLoopExits.insert(edge);
       }
     }
@@ -4691,7 +4686,6 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
       }
 
       if(!times2bePrinted[currBB]){
-        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
         toVisit.pop();
         continue;
       }
@@ -4739,7 +4733,6 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
       }
 
       if(!times2bePrinted[currBB]){
-        errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
         toVisit.pop();
         continue;
       }
@@ -4822,7 +4815,6 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 void CWriter::visitBranchInst(BranchInst &I) {
   CurInstr = &I;
 
-  errs() << "SUSAN: current branch:" << I << "\n";
   if(!I.isConditional()){
     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
@@ -4883,7 +4875,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
   // Print bodies
   // Case 1: it is a irregular loop exit
   if(exitLoopFalseBB || exitLoopTrueBB){
-      errs() << "SUSAN: exiting loop:" << *brBB << "\n";
         //print exitBB
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
         for (BasicBlock::iterator I = exitBB->begin();
@@ -4921,7 +4912,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
     //Case 2: only print if body
     if(trueBrOnly){
-      errs() << "SUSAN: trueBrOnly!!\n" << *brBB << "\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB, falseStartBB);
 
@@ -6512,7 +6502,9 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   }
 
   if (isa<GetElementPtrInst>(Operand)){
+    errs() << "SUSAN: operand is gep: " << *Operand << "\n";
     printGEPIndex.insert(Operand);
+    //writeInstComputationInline(*(dyn_cast<Instruction>(Operand)));
     writeOperandInternal(Operand);
     printGEPIndex.erase(Operand);
     return;
@@ -6606,7 +6598,10 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
 
   bool printIndex = false;
-  if(printGEPIndex.find(&I) != printGEPIndex.end()) printIndex = true;
+  if(printGEPIndex.find(&I) != printGEPIndex.end()){
+    printIndex = true;
+    errs() << "SUSAN: print index on gep" << I << "\n";
+  }
   printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), printIndex);
 }
 
