@@ -3532,9 +3532,10 @@ void CWriter::declareOneGlobalVariable(GlobalVariable *I) {
 
   printTypeNameForAddressableValue(Out, ElTy, false);
   Out << ' ' << GetValueName(I);
-  if(isa<ArrayType>(ElTy)){
-    ArrayType* arrayTy = dyn_cast<ArrayType>(ElTy);
-    Out << "[" << arrayTy->getNumElements() << "]";
+  ArrayType *ArrTy = dyn_cast<ArrayType>(ElTy);
+  while(ArrTy){
+    Out << "[" << ArrTy->getNumElements() << "]";
+    ArrTy = dyn_cast<ArrayType>(ArrTy->getElementType());
   }
   // If the initializer is not null, emit the initializer.  If it is null,
   // we try to avoid emitting large amounts of zeros.  The problem with
@@ -4201,18 +4202,17 @@ void CWriter::printFunction(Function &F) {
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
-      unsigned Alignment = AI->getAlignment();
-      bool IsOveraligned = Alignment && Alignment > TD->getABITypeAlignment(
-                                                        AI->getAllocatedType());
+
       Out << "  ";
-      if (IsOveraligned) {
-        headerUseMsAlign();
-        Out << "__MSALIGN__(" << Alignment << ") ";
-      }
       printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
       Out << ' ' << GetValueName(AI);
-      if (IsOveraligned)
-        Out << " __attribute__((aligned(" << Alignment << ")))";
+
+      ArrayType *ArrTy = dyn_cast<ArrayType>(AI->getAllocatedType());
+      while(ArrTy){
+        Out << "[" << ArrTy->getNumElements() << "]";
+        ArrTy = dyn_cast<ArrayType>(ArrTy->getElementType());
+      }
+
       Out << ";    /* Address-exposed local */\n";
       PrintedVar = true;
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
@@ -6598,10 +6598,7 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
 
   bool printIndex = false;
-  if(printGEPIndex.find(&I) != printGEPIndex.end()){
-    printIndex = true;
-    errs() << "SUSAN: print index on gep" << I << "\n";
-  }
+  if(printGEPIndex.find(&I) != printGEPIndex.end()) printIndex = true;
   printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), printIndex);
 }
 
