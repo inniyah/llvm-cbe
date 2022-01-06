@@ -3903,10 +3903,10 @@ void CWriter::printModuleTypes(raw_ostream &Out) {
 
   Out << "\n/* Types Definitions */\n";
 
-  for (auto it = TypedefDeclTypes.begin(), end = TypedefDeclTypes.end();
-       it != end; ++it) {
-    printContainedTypes(Out, *it, TypesPrinted);
-  }
+  //for (auto it = TypedefDeclTypes.begin(), end = TypedefDeclTypes.end();
+  //     it != end; ++it) {
+  //  printContainedTypes(Out, *it, TypesPrinted);
+  //}
 }
 
 void CWriter::forwardDeclareStructs(raw_ostream &Out, Type *Ty,
