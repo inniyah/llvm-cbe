@@ -6436,9 +6436,9 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
       ++I;
     } else {
       // Print (*P)[1] instead of P[0][1] (more idiomatic)
-      Out << "(*";
+      //Out << "(*";
       writeOperand(Ptr);
-      Out << ")";
+      //Out << ")";
     }
   }
 
@@ -6471,6 +6471,17 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
         Out << "[";
         writeOperandWithCast(Opnd, Instruction::GetElementPtr);
         Out << ']';
+
+        errs() << "SUSAN: intoT is " << *IntoT << "\n";
+        GetElementPtrInst* gepPtr = dyn_cast<GetElementPtrInst>(Ptr);
+        while(gepPtr){
+          errs() << "SUSAN: operation is GEP:" << *Ptr << "\n";
+          Opnd = gepPtr->getOperand(2);
+          Out << "[";
+          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+          Out << ']';
+          gepPtr = dyn_cast<GetElementPtrInst>(gepPtr->getPointerOperand());
+        }
       }
     } else if (!IntoT->isVectorTy()) {
       Out << '[';
