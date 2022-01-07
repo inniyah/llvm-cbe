@@ -6418,10 +6418,12 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
   IntoT = I.getIndexedType();
   ++I;
   if (!isConstantNull(FirstOp)) {
+    errs() << "SUSAN: first op is not null\n";
     writeOperand(Ptr);
-    Out << '[';
-    writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
-    Out << ']';
+    //Out << '[';
+    Out << " + ";
+    writeOperand(FirstOp, ContextCasted);
+    //Out << ']';
   } else {
     // When the first index is 0 (very common) we can simplify it.
     if (isAddressExposed(Ptr)) {
