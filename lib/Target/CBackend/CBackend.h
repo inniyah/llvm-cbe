@@ -69,7 +69,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<std::pair<BasicBlock*, BasicBlock*>> irregularLoopExits;
   std::set<BranchInst*> ifBranches;
   std::set<Type*> printedTypeNames;
-  std::set<Value*> printGEPIndex;
+  std::set<Value*> accessGEPMemory;
   // BBs controled by splitted BBs can be printed more than once
 
   // SUSAN: PDT
@@ -382,7 +382,7 @@ private:
                                   unsigned Indent);
   void printBranchToBlock(BasicBlock *CurBlock, BasicBlock *SuccBlock,
                           unsigned Indent);
-  void printGEPExpression(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool printIndex=false);
+  void printGEPExpression(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory=false);
 
   std::string GetValueName(Value *Operand);
 

@@ -3903,10 +3903,10 @@ void CWriter::printModuleTypes(raw_ostream &Out) {
 
   Out << "\n/* Types Definitions */\n";
 
-  //for (auto it = TypedefDeclTypes.begin(), end = TypedefDeclTypes.end();
-  //     it != end; ++it) {
-  //  printContainedTypes(Out, *it, TypesPrinted);
-  //}
+  for (auto it = TypedefDeclTypes.begin(), end = TypedefDeclTypes.end();
+       it != end; ++it) {
+    printContainedTypes(Out, *it, TypesPrinted);
+  }
 }
 
 void CWriter::forwardDeclareStructs(raw_ostream &Out, Type *Ty,
@@ -6377,7 +6377,7 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 }
 
 void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
-                                 gep_type_iterator E,  bool printIndex) {
+                                 gep_type_iterator E,  bool accessMemory) {
 
   // If there are no indices, just print out the pointer.
   if (I == E) {
@@ -6418,12 +6418,20 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
   IntoT = I.getIndexedType();
   ++I;
   if (!isConstantNull(FirstOp)) {
-    errs() << "SUSAN: first op is not null\n";
-    writeOperand(Ptr);
-    //Out << '[';
-    Out << " + ";
-    writeOperand(FirstOp, ContextCasted);
-    //Out << ']';
+    //if it's just pointer operation then translates as ptr+1
+    if(!accessMemory){
+      writeOperand(Ptr);
+      Out << " + ";
+      writeOperand(FirstOp, ContextCasted);
+    }
+    //if it access memory, then translates as ptr[1]
+    else{
+      writeOperand(Ptr);
+      Out << "[";
+      writeOperand(FirstOp, ContextCasted);
+      Out << "]";
+    }
+
   } else {
     // When the first index is 0 (very common) we can simplify it.
     if (isAddressExposed(Ptr)) {
@@ -6444,7 +6452,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     }
   }
 
-  if(printIndex){
+  if(accessMemory){
   for (; I != E; ++I) {
     Value *Opnd = I.getOperand();
 
@@ -6516,10 +6524,10 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
 
   if (isa<GetElementPtrInst>(Operand)){
     errs() << "SUSAN: operand is gep: " << *Operand << "\n";
-    printGEPIndex.insert(Operand);
+    accessGEPMemory.insert(Operand);
     //writeInstComputationInline(*(dyn_cast<Instruction>(Operand)));
     writeOperandInternal(Operand);
-    printGEPIndex.erase(Operand);
+    accessGEPMemory.erase(Operand);
     return;
   }
 
@@ -6610,9 +6618,9 @@ void CWriter::visitFenceInst(FenceInst &I) {
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
 
-  bool printIndex = false;
-  if(printGEPIndex.find(&I) != printGEPIndex.end()) printIndex = true;
-  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), printIndex);
+  bool accessMemory = false;
+  if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
+  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
