@@ -6413,7 +6413,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
-  if(ptrType && !isa<ArrayType>(ptrType)) Out << '&';
+  if(ptrType && isa<StructType>(ptrType)) Out << '&';
 
   Type *IntoT = I.getIndexedType();
 
