@@ -654,6 +654,11 @@ raw_ostream &CWriter::printStructDeclaration(raw_ostream &Out,
     if (empty)
       Out << "/* "; // skip zero-sized types
     printTypeName(Out, *I, false) << " field" << utostr(Idx);
+    ArrayType *ArrTy = dyn_cast<ArrayType>(*I);
+    while(ArrTy){
+      Out << "[" << ArrTy->getNumElements() << "]";
+      ArrTy = dyn_cast<ArrayType>(ArrTy->getElementType());
+    }
     if (empty)
       Out << " */"; // skip zero-sized types
     else
@@ -6377,7 +6382,7 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 }
 
 void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
-                                 gep_type_iterator E,  bool accessMemory) {
+                                 gep_type_iterator E,  bool accessMemory, Type* ptrType) {
 
   // If there are no indices, just print out the pointer.
   if (I == E) {
@@ -6408,7 +6413,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
-  //Out << '&';
+  if(ptrType && !isa<ArrayType>(ptrType)) Out << '&';
 
   Type *IntoT = I.getIndexedType();
 
@@ -6452,7 +6457,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     }
   }
 
-  if(accessMemory){
+  //if(accessMemory){
   for (; I != E; ++I) {
     Value *Opnd = I.getOperand();
 
@@ -6465,32 +6470,32 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     if (I.isStruct()) {
       Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
     } else if (IntoT->isArrayTy()) {
-      // Zero-element array types are either skipped or, for pointers, peeled
-      // off by skipEmptyArrayTypes. In this latter case, we can translate
-      // zero-element array indexing as pointer arithmetic.
-      if (IntoT->getArrayNumElements() == 0) {
-        if (!isConstantNull(Opnd)) {
-          // TODO: The operator precedence here is only correct if there are no
-          //       subsequent indexable types other than zero-element arrays.
-          cwriter_assert(skipEmptyArrayTypes(IntoT)->isSingleValueType());
-          Out << " + (";
-          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
-          Out << ')';
-        }
-      } else {
-        Out << "[";
-        writeOperandWithCast(Opnd, Instruction::GetElementPtr);
-        Out << ']';
+      if(accessMemory){
+         // Zero-element array types are either skipped or, for pointers, peeled
+         // off by skipEmptyArrayTypes. In this latter case, we can translate
+         // zero-element array indexing as pointer arithmetic.
+         if (IntoT->getArrayNumElements() == 0) {
+           if (!isConstantNull(Opnd)) {
+             // TODO: The operator precedence here is only correct if there are no
+             //       subsequent indexable types other than zero-element arrays.
+             cwriter_assert(skipEmptyArrayTypes(IntoT)->isSingleValueType());
+             Out << " + (";
+             writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+             Out << ')';
+           }
+         } else {
+           Out << "[";
+           writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+           Out << ']';
 
-        errs() << "SUSAN: intoT is " << *IntoT << "\n";
-        GetElementPtrInst* gepPtr = dyn_cast<GetElementPtrInst>(Ptr);
-        while(gepPtr){
-          errs() << "SUSAN: operation is GEP:" << *Ptr << "\n";
-          Opnd = gepPtr->getOperand(2);
-          Out << "[";
-          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
-          Out << ']';
-          gepPtr = dyn_cast<GetElementPtrInst>(gepPtr->getPointerOperand());
+           GetElementPtrInst* gepPtr = dyn_cast<GetElementPtrInst>(Ptr);
+           while(gepPtr){
+             Opnd = gepPtr->getOperand(2);
+             Out << "[";
+             writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+             Out << ']';
+             gepPtr = dyn_cast<GetElementPtrInst>(gepPtr->getPointerOperand());
+           }
         }
       }
     } else if (!IntoT->isVectorTy()) {
@@ -6511,7 +6516,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
 
     IntoT = I.getIndexedType();
   }
-  }
+  //}
   //Out << ")";
 }
 
@@ -6522,8 +6527,8 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
     return;
   }
 
-  if (isa<GetElementPtrInst>(Operand)){
-    errs() << "SUSAN: operand is gep: " << *Operand << "\n";
+  GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
+  if (gepInst && isa<ArrayType>(gepInst->getSourceElementType()) ){
     accessGEPMemory.insert(Operand);
     //writeInstComputationInline(*(dyn_cast<Instruction>(Operand)));
     writeOperandInternal(Operand);
@@ -6620,7 +6625,7 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
 
   bool accessMemory = false;
   if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
-  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
+  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory, I.getSourceElementType());
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
