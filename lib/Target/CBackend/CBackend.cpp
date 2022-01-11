@@ -1204,11 +1204,12 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       return;
 
     case Instruction::GetElementPtr:
+    {
       Out << "(";
-      printGEPExpression(CE->getOperand(0), gep_type_begin(CPV),
-                         gep_type_end(CPV));
+      printGEPExpressionArray(CE->getOperand(0), gep_type_begin(CPV), gep_type_end(CPV));
       Out << ")";
       return;
+    }
     case Instruction::Select:
       Out << '(';
       printConstant(CE->getOperand(0), ContextCasted);
@@ -6381,8 +6382,124 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
   Out << "))";
 }
 
-void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
-                                 gep_type_iterator E,  bool accessMemory, Type* ptrType) {
+
+void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
+                                 gep_type_iterator E) {
+  // If there are no indices, just print out the pointer.
+  if (I == E) {
+    writeOperand(Ptr);
+    return;
+  }
+
+  // Find out if the last index is into a vector.  If so, we have to print this
+  // specially.  Since vectors can't have elements of indexable type, only the
+  // last index could possibly be of a vector element.
+  VectorType *LastIndexIsVector = 0;
+  {
+    for (gep_type_iterator TmpI = I; TmpI != E; ++TmpI)
+      LastIndexIsVector = dyn_cast<VectorType>(TmpI.getIndexedType());
+  }
+
+  Out << "(";
+
+  // If the last index is into a vector, we can't print it as &a[i][j] because
+  // we can't index into a vector with j in GCC.  Instead, emit this as
+  // (((float*)&a[i])+j)
+  // TODO: this is no longer true now that we don't represent vectors using
+  // gcc-extentions
+  if (LastIndexIsVector) {
+    Out << "((";
+    printTypeName(Out,
+                  PointerType::getUnqual(LastIndexIsVector->getElementType()));
+    Out << ")(";
+  }
+
+  Out << '&';
+
+  Type *IntoT = I.getIndexedType();
+
+  // The first index of a GEP is special. It does pointer arithmetic without
+  // indexing into the element type.
+  Value *FirstOp = I.getOperand();
+  IntoT = I.getIndexedType();
+  ++I;
+  if (!isConstantNull(FirstOp)) {
+    writeOperand(Ptr);
+    Out << '[';
+    writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+    Out << ']';
+  } else {
+    // When the first index is 0 (very common) we can simplify it.
+    if (isAddressExposed(Ptr)) {
+      // Print P rather than (&P)[0]
+      writeOperandInternal(Ptr);
+    } else if (I != E && I.isStruct()) {
+      // If the second index is a struct index, print P->f instead of P[0].f
+      writeOperand(Ptr);
+      Out << "->field" << cast<ConstantInt>(I.getOperand())->getZExtValue();
+      // Eat the struct index
+      IntoT = I.getIndexedType();
+      ++I;
+    } else {
+      // Print (*P)[1] instead of P[0][1] (more idiomatic)
+      Out << "(*";
+      writeOperand(Ptr);
+      Out << ")";
+    }
+  }
+
+  for (; I != E; ++I) {
+    Value *Opnd = I.getOperand();
+
+    cwriter_assert(
+        Opnd
+            ->getType()
+            ->isIntegerTy()); // TODO: indexing a Vector with a Vector is valid,
+                              // but we don't support it here
+
+    if (I.isStruct()) {
+      Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
+    } else if (IntoT->isArrayTy()) {
+      // Zero-element array types are either skipped or, for pointers, peeled
+      // off by skipEmptyArrayTypes. In this latter case, we can translate
+      // zero-element array indexing as pointer arithmetic.
+      if (IntoT->getArrayNumElements() == 0) {
+        if (!isConstantNull(Opnd)) {
+          // TODO: The operator precedence here is only correct if there are no
+          //       subsequent indexable types other than zero-element arrays.
+          cwriter_assert(skipEmptyArrayTypes(IntoT)->isSingleValueType());
+          Out << " + (";
+          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+          Out << ')';
+        }
+      } else {
+        Out << ".array[";
+        writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+        Out << ']';
+      }
+    } else if (!IntoT->isVectorTy()) {
+      Out << '[';
+      writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+      Out << ']';
+    } else {
+      // If the last index is into a vector, then print it out as "+j)".  This
+      // works with the 'LastIndexIsVector' code above.
+      if (!isConstantNull(Opnd)) {
+        Out << "))"; // avoid "+0".
+      } else {
+        Out << ")+(";
+        writeOperandWithCast(I.getOperand(), Instruction::GetElementPtr);
+        Out << "))";
+      }
+    }
+
+    IntoT = I.getIndexedType();
+  }
+  Out << ")";
+}
+
+void CWriter::printGEPExpressionArray(Value *Ptr, gep_type_iterator I,
+                                 gep_type_iterator E,  bool accessMemory) {
 
   // If there are no indices, just print out the pointer.
   if (I == E) {
@@ -6413,7 +6530,6 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
-  if(ptrType && isa<StructType>(ptrType)) Out << '&';
 
   Type *IntoT = I.getIndexedType();
 
@@ -6438,23 +6554,8 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
     }
 
   } else {
-    // When the first index is 0 (very common) we can simplify it.
-    if (isAddressExposed(Ptr)) {
-      // Print P rather than (&P)[0]
-      writeOperandInternal(Ptr);
-    } else if (I != E && I.isStruct()) {
-      // If the second index is a struct index, print P->f instead of P[0].f
+      //writeOperandInternal(Ptr);
       writeOperand(Ptr);
-      Out << "->field" << cast<ConstantInt>(I.getOperand())->getZExtValue();
-      // Eat the struct index
-      IntoT = I.getIndexedType();
-      ++I;
-    } else {
-      // Print (*P)[1] instead of P[0][1] (more idiomatic)
-      //Out << "(*";
-      writeOperand(Ptr);
-      //Out << ")";
-    }
   }
 
   //if(accessMemory){
@@ -6467,9 +6568,7 @@ void CWriter::printGEPExpression(Value *Ptr, gep_type_iterator I,
             ->isIntegerTy()); // TODO: indexing a Vector with a Vector is valid,
                               // but we don't support it here
 
-    if (I.isStruct()) {
-      Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
-    } else if (IntoT->isArrayTy()) {
+    if (IntoT->isArrayTy()) {
       if(accessMemory){
          // Zero-element array types are either skipped or, for pointers, peeled
          // off by skipEmptyArrayTypes. In this latter case, we can translate
@@ -6622,10 +6721,14 @@ void CWriter::visitFenceInst(FenceInst &I) {
 
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
-
-  bool accessMemory = false;
-  if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
-  printGEPExpression(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory, I.getSourceElementType());
+  if(isa<StructType>(I.getSourceElementType())){
+    printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I));
+  }
+  else{
+    bool accessMemory = false;
+    if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
+    printGEPExpressionArray(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
+  }
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
