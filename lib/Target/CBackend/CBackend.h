@@ -70,6 +70,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BranchInst*> ifBranches;
   std::set<Type*> printedTypeNames;
   std::set<Value*> accessGEPMemory;
+  std::set<GetElementPtrInst*> NoneArrayGEPs;
   // BBs controled by splitted BBs can be printed more than once
 
   // SUSAN: PDT
@@ -274,6 +275,8 @@ private:
   void printInstruction(Instruction *I);
   void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
   void emitSwitchBlock(BasicBlock* start, BasicBlock *brBlockk);
+  bool GEPAccessesMemory(GetElementPtrInst *I);
+  void collectNoneArrayGEPs(Function &F);
 
 
   void writeOperandDeref(Value *Operand);

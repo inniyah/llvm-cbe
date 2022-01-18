@@ -223,6 +223,54 @@ void markBBwithNumOfVisits(Function &F, std::map<BasicBlock*, int> &times2bePrin
   }
 }
 
+void collectNoneArrayGEPsDownStream(GetElementPtrInst *gepInst, std::set<GetElementPtrInst*> &NoneArrayGEPs){
+  // collect StructGeps DownStream
+  GetElementPtrInst *gep = gepInst;
+  Value *opnd = gep->getPointerOperand();
+  while(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(opnd)){
+    NoneArrayGEPs.insert(gep);
+    opnd = gep->getPointerOperand();
+  }
+}
+
+void CheckAndAddArrayGep2NoneArrayGEPs(GetElementPtrInst *gepInst, std::set<GetElementPtrInst*> &NoneArrayGEPs){
+  GetElementPtrInst *gep = gepInst;
+  Value *opnd = gep->getPointerOperand();
+  while(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(opnd)){
+    NoneArrayGEPs.insert(gep);
+    if(NoneArrayGEPs.find(gep) != NoneArrayGEPs.end()){
+      NoneArrayGEPs.insert(gepInst);
+      break;
+    }
+  }
+}
+
+void CWriter::collectNoneArrayGEPs(Function &F){
+
+  std::set<GetElementPtrInst*>arrayGeps;
+  // collect array geps, then the rest goes into struct geps, anything in the downstream of struct geps also goes to struct geps
+  for(auto &BB : F){
+    for(auto &I : BB){
+      if(GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(&I)){
+        if(isa<ArrayType>(gepInst->getSourceElementType())){
+          arrayGeps.insert(gepInst);
+        }
+        else{
+          NoneArrayGEPs.insert(gepInst);
+          collectNoneArrayGEPsDownStream(gepInst, NoneArrayGEPs);
+        }
+      }
+    }
+  }
+
+  //collect array geps into none array geps if array geps has struct geps down stream
+  for(auto gep : arrayGeps){
+    CheckAndAddArrayGep2NoneArrayGEPs(gep, NoneArrayGEPs);
+    collectNoneArrayGEPsDownStream(gep, NoneArrayGEPs);
+  }
+
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   // Do not codegen any 'available_externally' functions at all, they have
@@ -250,6 +298,7 @@ bool CWriter::runOnFunction(Function &F) {
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F, times2bePrinted); //5
+  //collectNoneArrayGEPs(F);
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -4482,6 +4531,7 @@ void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
           << "\n";
       LastAnnotatedSourceLine = Loc->getLine();
     }*/
+    //Note: If inlinableinst will be recursively written through writeOperandInternal function
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
@@ -6554,8 +6604,7 @@ void CWriter::printGEPExpressionArray(Value *Ptr, gep_type_iterator I,
     }
 
   } else {
-      //writeOperandInternal(Ptr);
-      writeOperand(Ptr);
+      writeOperandInternal(Ptr);
   }
 
   //if(accessMemory){
@@ -6719,9 +6768,35 @@ void CWriter::visitFenceInst(FenceInst &I) {
   Out << ");\n";
 }
 
+bool CWriter::GEPAccessesMemory(GetElementPtrInst *I){
+   if(accessGEPMemory.find(I) != accessGEPMemory.end()) return true;
+
+   for (User *U : I->users()) {
+     if (LoadInst *memInst = dyn_cast<LoadInst>(U)) {
+       if(memInst->getOperand(0) == cast<Value>(I)){
+         accessGEPMemory.insert(I);
+         return true;
+       }
+     }
+     else if(StoreInst *memInst = dyn_cast<StoreInst>(U)){
+       if(memInst->getOperand(1) == cast<Value>(I)){
+         accessGEPMemory.insert(I);
+         return true;
+       }
+     }
+     else if(GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(U)){
+       if(gepInst->getPointerOperand() == cast<Value>(I))
+         return GEPAccessesMemory(gepInst);
+     }
+   }
+
+   return false;
+}
+
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
   if(isa<StructType>(I.getSourceElementType())){
+  //if(NoneArrayGEPs.find(&I) != NoneArrayGEPs.end()){
     printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I));
   }
   else{
