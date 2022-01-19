@@ -298,7 +298,7 @@ bool CWriter::runOnFunction(Function &F) {
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F, times2bePrinted); //5
-  //collectNoneArrayGEPs(F);
+  collectNoneArrayGEPs(F);
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -6684,30 +6684,31 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
     return;
   }
 
-  bool IsUnaligned =
-      Alignment && Alignment < TD->getABITypeAlignment(OperandType);
+  //bool IsUnaligned =
+  //    Alignment && Alignment < TD->getABITypeAlignment(OperandType);
 
-  if (!IsUnaligned) {
+  //if (!IsUnaligned) {
     Out << '*';
-    if (IsVolatile) {
-      Out << "(volatile ";
-      printTypeName(Out, OperandType, false);
-      Out << "*)";
-    }
-  } else if (IsUnaligned) {
+  //  if (IsVolatile) {
+  //    Out << "(volatile ";
+  //    printTypeName(Out, OperandType, false);
+  //    Out << "*)";
+  //  }
+  //}
+  /*else if (IsUnaligned) {
     headerUseUnalignedLoad();
     Out << "__UNALIGNED_LOAD__(";
     printTypeNameUnaligned(Out, OperandType, false);
     if (IsVolatile)
       Out << " volatile";
     Out << ", " << Alignment << ", ";
-  }
+  }*/
 
   writeOperand(Operand);
 
-  if (IsUnaligned) {
-    Out << ")";
-  }
+  //if (IsUnaligned) {
+  //  Out << ")";
+  //}
 }
 
 void CWriter::visitLoadInst(LoadInst &I) {
