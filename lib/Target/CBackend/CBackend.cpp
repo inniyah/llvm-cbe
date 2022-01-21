@@ -6473,7 +6473,7 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   Type *IntoT = I.getIndexedType();
   Value *FirstOp = I.getOperand();
-  bool currGEPisPointer = !(isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
+  bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
 
   //first index
   if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
