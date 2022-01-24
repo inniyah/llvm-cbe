@@ -6471,6 +6471,17 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   //Out << '&';
 
+  std::set<Value*>NegOpnd;
+
+  //check if there are negative indexes
+  auto it = I;
+  for (; it != E; ++it) {
+    Value *Opnd = it.getOperand();
+    if(ConstantInt *intOpnd = dyn_cast<ConstantInt>(Opnd))
+      if(intOpnd->getSExtValue() < 0)
+        NegOpnd.insert(intOpnd);
+  }
+
   Type *IntoT = I.getIndexedType();
   Value *FirstOp = I.getOperand();
 
@@ -6489,12 +6500,22 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     }
   }
   else if(isa<IntegerType>(IntoT)){
-    //if indexed type is an integer, it means access the array
+    //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
-      writeOperandInternal(Ptr);
-      Out << '[';
-      writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
-      Out << ']';
+      //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
+      if(NegOpnd.find(FirstOp) != NegOpnd.end()){
+        Out << "*(";
+        writeOperandInternal(Ptr);
+        Out << '+';
+        writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+        Out << ')';
+      }
+      else{
+        writeOperandInternal(Ptr);
+        Out << '[';
+        writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+        Out << ']';
+      }
     }
     else{
       if(!isConstantNull(FirstOp)){
