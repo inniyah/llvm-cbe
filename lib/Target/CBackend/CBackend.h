@@ -70,6 +70,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BranchInst*> ifBranches;
   std::set<Type*> printedTypeNames;
   std::set<GetElementPtrInst*> accessGEPMemory;
+  std::set<GetElementPtrInst*> GEPPointers;
   std::set<GetElementPtrInst*> NoneArrayGEPs;
   // BBs controled by splitted BBs can be printed more than once
 
@@ -385,7 +386,7 @@ private:
                                   unsigned Indent);
   void printBranchToBlock(BasicBlock *CurBlock, BasicBlock *SuccBlock,
                           unsigned Indent);
-  void printGEPExpressionStruct(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory = false);
+  bool printGEPExpressionStruct(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory = false);
   void printGEPExpressionArray(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory=false);
 
   std::string GetValueName(Value *Operand);

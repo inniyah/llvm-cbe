@@ -6438,12 +6438,12 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 }
 
 
-void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
+bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
                                  gep_type_iterator E, bool accessMemory) {
   // If there are no indices, just print out the pointer.
   if (I == E) {
     writeOperand(Ptr);
-    return;
+    return false;
   }
 
   // Find out if the last index is into a vector.  If so, we have to print this
@@ -6473,7 +6473,6 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   Type *IntoT = I.getIndexedType();
   Value *FirstOp = I.getOperand();
-  bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
 
   //first index
   if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
@@ -6516,6 +6515,16 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   I++;
 
+  bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
+  //check if previous GEP operand is a pointer
+  bool prevGEPisPointer = false;
+  if(GetElementPtrInst *prevGEP = dyn_cast<GetElementPtrInst>(Ptr)){
+    if(GEPPointers.find(prevGEP) != GEPPointers.end()){
+      prevGEPisPointer = true;
+    }
+  }
+  bool isPointer = currGEPisPointer || prevGEPisPointer;
+
   Type *prevType = IntoT;
   for (; I != E; ++I) {
     //IntoT = I.getIndexedType();
@@ -6531,7 +6540,7 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     }
     else if(isa<StructType>(prevType)){
       if(accessMemory){
-        if(currGEPisPointer)
+        if(isPointer)
           Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
         else
           Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
@@ -6542,9 +6551,12 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     else{
       assert(0 && "vector type not supported\n");
     }
-    currGEPisPointer = false;
+    isPointer = false;
     prevType = I.getIndexedType();
   }
+
+  Out << ")";
+  return isPointer;
 
  // if (!isConstantNull(FirstOp)) {
  //   writeOperand(Ptr);
@@ -6618,7 +6630,6 @@ void CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
  //   IntoT = I.getIndexedType();
  // }
-  Out << ")";
 }
 
 void CWriter::printGEPExpressionArray(Value *Ptr, gep_type_iterator I,
@@ -6867,9 +6878,18 @@ bool CWriter::GEPAccessesMemory(GetElementPtrInst *I){
 
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
+
   bool accessMemory = false;
   if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
-  printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
+
+//  bool prevGEPisPointer = false;
+//  if(GetElementPtrInst *prevGEP = dyn_cast<GetElementPtrInst>(I.getPointerOperand())){
+//    if(GEPPointers.find(prevGEP) != GEPPointers.end())
+//      prevGEPisPointer = true;
+//  }
+
+  bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
+  if(currGEPisPointer)GEPPointers.insert(&I);
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
