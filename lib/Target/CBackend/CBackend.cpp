@@ -6693,7 +6693,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
           assert( 0 && "SUSAN: dereferencing more than expected?\n");
         }
         isPointer = false;
-      } else if(!isConstantNull(Opnd)) {
+      } else{
         if(isPointer)
           Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
         else
@@ -6905,22 +6905,50 @@ void CWriter::printGEPExpressionArray(Value *Ptr, gep_type_iterator I,
 
 void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
                                 bool IsVolatile, unsigned Alignment /*bytes*/) {
-  //if (isAddressExposed(Operand) && !IsVolatile) {
-  //  writeOperandInternal(Operand);
-  //  return;
-  //}
-  GetElementPtrInst *gepInst = nullptr;
-  if(CastInst *castInst = dyn_cast<CastInst>(Operand)){
-    gepInst = dyn_cast<GetElementPtrInst>(castInst->getOperand(0));
+
+  GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
+
+  if(gepInst){
+    Value *UO = findUnderlyingObject(gepInst);
+    currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
+    while (gepInst){
+      accessGEPMemory.insert(gepInst);
+      gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
+    }
+    writeOperandInternal(Operand);
+    return;
   }
-  else{
-    gepInst = dyn_cast<GetElementPtrInst>(Operand);
+
+
+  if (isAddressExposed(Operand) && !IsVolatile) {
+    writeOperandInternal(Operand);
+    return;
   }
-  Value *UO = findUnderlyingObject(gepInst);
-  currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
-  while (gepInst){
-    accessGEPMemory.insert(gepInst);
-    gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
+
+  bool IsUnaligned =
+    Alignment && Alignment < TD->getABITypeAlignment(OperandType);
+
+  if (!IsUnaligned) {
+    Out << '*';
+    if (IsVolatile) {
+      Out << "(volatile ";
+      printTypeName(Out, OperandType, false);
+      Out << "*)";
+    }
+  }
+  else if (IsUnaligned) {
+    headerUseUnalignedLoad();
+    Out << "__UNALIGNED_LOAD__(";
+    printTypeNameUnaligned(Out, OperandType, false);
+    if (IsVolatile)
+      Out << " volatile";
+    Out << ", " << Alignment << ", ";
+  }
+
+  writeOperand(Operand);
+
+  if (IsUnaligned) {
+    Out << ")";
   }
 
 
@@ -6945,7 +6973,6 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   }*/
 
 
-  writeOperandInternal(Operand);
 
   //if (IsUnaligned) {
   //  Out << ")";
