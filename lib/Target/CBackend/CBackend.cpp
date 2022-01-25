@@ -6562,8 +6562,9 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
   if(!accessMemory){
     //check if adding & is needed
     auto it = I;
-    if(++it != E)
+    if(isa<StructType>(it.getIndexedType()) && (++it != E)){
       Out << '&';
+    }
   }
 
   std::set<Value*>NegOpnd;
