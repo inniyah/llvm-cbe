@@ -246,33 +246,49 @@ void CheckAndAddArrayGep2NoneArrayGEPs(GetElementPtrInst *gepInst, std::set<GetE
 }
 
 
+void CWriter::findVariableDepth(Type *Ty, Value *UO){
+  if(Times2Dereference.find(cast<Value>(UO)) == Times2Dereference.end())
+    Times2Dereference[cast<Value>(UO)] = 1;
+  else
+    Times2Dereference[cast<Value>(UO)]++;
+
+  if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
+    Type *nextTy = ptrTy->getPointerElementType();
+    if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
+      findVariableDepth(nextTy, UO);
+  }
+  else if(ArrayType *arrTy = dyn_cast<ArrayType>(Ty)){
+    Type *nextTy = arrTy->getArrayElementType();
+    if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
+      findVariableDepth(nextTy, UO);
+  }
+  else if(StructType *strucTy = dyn_cast<StructType>(Ty)){
+    for (StructType::element_iterator I = strucTy->element_begin(),
+                              E = strucTy->element_end(); I != E; ++I) {
+      Type *nextTy = *I;
+      if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
+        findVariableDepth(nextTy, UO);
+    }
+  }
+}
+
 void CWriter::collectVariables2Deref(Function &F){
   // SUSAN: build the table of local variable : times to be dereferenced
   // GEP might not be directly connected to a site
   //  change this!!
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
 
-    PointerType *ptrTy = nullptr;
-
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
-      ptrTy = dyn_cast<PointerType>(AI->getAllocatedType());
+      Type *allocTy = AI->getAllocatedType();
+      if(isa<PointerType>(allocTy) || isa<StructType>(allocTy) || isa<ArrayType>(allocTy))
+        findVariableDepth(allocTy, cast<Value>(&*I));
     }
     else if(CallInst *CI = dyn_cast<CallInst>(&*I)){
       if(Function *func = CI->getCalledFunction()){
         StringRef funcName = func->getName();
-        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
-          ptrTy = dyn_cast<PointerType>(CI->getType());
-          assert(ptrTy && "SUSAN: malloc didn't return pointer type?\n");
-        }
+        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc")
+          findVariableDepth(CI->getType(), cast<Value>(&*I));
       }
-    }
-
-    while(ptrTy){
-        if(Times2Dereference.find(cast<Value>(&*I)) == Times2Dereference.end())
-          Times2Dereference[cast<Value>(&*I)] = 1;
-        else
-          Times2Dereference[cast<Value>(&*I)]++;
-        ptrTy = dyn_cast<PointerType>(ptrTy->getPointerElementType());
     }
   }
 }
@@ -2787,6 +2803,13 @@ void CWriter::generateHeader(Module &M) {
     Out << ";\n";
   }
 
+  //SUSAN: add global variables into dereference records
+  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
+        I != E; ++I) {
+      GlobalVariable* inst = &*I;
+      errs() << "SUSAN: global variable: " << *inst << "\n";
+  }
+
   // Output the global variable definitions and contents...
   if (!M.global_empty()) {
     Out << "\n\n/* Global Variable Definitions and Initialization */\n";
@@ -4095,6 +4118,14 @@ bool CWriter::canDeclareLocalLate(Instruction &I) {
 }
 
 void CWriter::printFunction(Function &F) {
+
+  //SUSAN: collect function argument reference depths
+  for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
+    Type *argTy = arg->getType();
+    if(isa<ArrayType>(argTy) || isa<PointerType>(argTy) || isa<StructType>(argTy)){
+      findVariableDepth(argTy, cast<Value>(arg));
+    }
+  }
 
   /// isStructReturn - Should this function actually return a struct by-value?
   bool isStructReturn = F.hasStructRetAttr();
@@ -6527,7 +6558,13 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
-  //Out << '&';
+
+  if(!accessMemory){
+    //check if adding & is needed
+    auto it = I;
+    if(++it != E)
+      Out << '&';
+  }
 
   std::set<Value*>NegOpnd;
 
@@ -6589,6 +6626,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       }
     }
     else{
+
+
       if(!isConstantNull(FirstOp)){
         Out << '(';
         writeOperandInternal(Ptr);
@@ -6599,6 +6638,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       else{
         writeOperandInternal(Ptr);
       }
+
+
     }
   }
   else{
@@ -6625,8 +6666,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
-          Value *UO = findUnderlyingObject(Ptr);
-          errs() << "SUSAN: dereferencing " << *UO << "\n";
           Out << '[';
           writeOperandWithCast(Opnd, Instruction::GetElementPtr);
           Out << ']';
@@ -6636,8 +6675,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         }
         isPointer = false;
       } else if(!isConstantNull(Opnd)) {
-        errs() << "SUSAN: Opnd\n";
-        assert(0 && "not supported pointer operation beyond first level\n");
+        Out << '+';
+        writeOperandWithCast(Opnd, Instruction::GetElementPtr);
       }
     }
     else if(isa<StructType>(prevType)){
@@ -6645,8 +6684,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
-          Value *UO = findUnderlyingObject(Ptr);
-          errs() << "SUSAN: dereferencing " << *UO << "\n";
           if(isPointer)
             Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
           else
@@ -6657,7 +6694,10 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         }
         isPointer = false;
       } else if(!isConstantNull(Opnd)) {
-        assert(0 && "not supported pointer operation beyond first level\n");
+        if(isPointer)
+          Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
+        else
+          Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
       }
     }
     else{
@@ -6869,8 +6909,13 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   //  writeOperandInternal(Operand);
   //  return;
   //}
-
-  GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
+  GetElementPtrInst *gepInst = nullptr;
+  if(CastInst *castInst = dyn_cast<CastInst>(Operand)){
+    gepInst = dyn_cast<GetElementPtrInst>(castInst->getOperand(0));
+  }
+  else{
+    gepInst = dyn_cast<GetElementPtrInst>(Operand);
+  }
   Value *UO = findUnderlyingObject(gepInst);
   currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
   while (gepInst){

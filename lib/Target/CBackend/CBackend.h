@@ -281,6 +281,7 @@ private:
   void collectNoneArrayGEPs(Function &F);
   void collectVariables2Deref(Function &F);
   Value* findUnderlyingObject(Value *Ptr);
+  void findVariableDepth(Type *Ty, Value *UO);
 
 
   void writeOperandDeref(Value *Operand);
