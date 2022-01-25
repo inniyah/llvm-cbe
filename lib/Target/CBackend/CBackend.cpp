@@ -245,6 +245,38 @@ void CheckAndAddArrayGep2NoneArrayGEPs(GetElementPtrInst *gepInst, std::set<GetE
   }
 }
 
+
+void CWriter::collectVariables2Deref(Function &F){
+  // SUSAN: build the table of local variable : times to be dereferenced
+  // GEP might not be directly connected to a site
+  //  change this!!
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+
+    PointerType *ptrTy = nullptr;
+
+    if (AllocaInst *AI = isDirectAlloca(&*I)) {
+      ptrTy = dyn_cast<PointerType>(AI->getAllocatedType());
+    }
+    else if(CallInst *CI = dyn_cast<CallInst>(&*I)){
+      if(Function *func = CI->getCalledFunction()){
+        StringRef funcName = func->getName();
+        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
+          ptrTy = dyn_cast<PointerType>(CI->getType());
+          assert(ptrTy && "SUSAN: malloc didn't return pointer type?\n");
+        }
+      }
+    }
+
+    while(ptrTy){
+        if(Times2Dereference.find(cast<Value>(&*I)) == Times2Dereference.end())
+          Times2Dereference[cast<Value>(&*I)] = 1;
+        else
+          Times2Dereference[cast<Value>(&*I)]++;
+        ptrTy = dyn_cast<PointerType>(ptrTy->getPointerElementType());
+    }
+  }
+}
+
 void CWriter::collectNoneArrayGEPs(Function &F){
 
   std::set<GetElementPtrInst*>arrayGeps;
@@ -299,6 +331,7 @@ bool CWriter::runOnFunction(Function &F) {
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F, times2bePrinted); //5
   collectNoneArrayGEPs(F);
+  collectVariables2Deref(F);
 
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
@@ -4259,6 +4292,7 @@ void CWriter::printFunction(Function &F) {
             IR2vars[operand].insert(var);
           }
 
+
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
@@ -6438,6 +6472,30 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 }
 
 
+Value* CWriter::findUnderlyingObject(Value *Ptr){
+  if(!Ptr) return Ptr;
+  if(!isa<GetElementPtrInst>(Ptr)) return Ptr;
+
+  Value *nextPtr = Ptr;
+  while(GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(nextPtr)){
+    nextPtr = gepInst->getPointerOperand();
+  }
+
+  if(Times2Dereference.find(nextPtr) != Times2Dereference.end()) return nextPtr;
+
+  if(CastInst *castInst= dyn_cast<CastInst>(nextPtr)){
+    Value *obj = castInst->getOperand(0);
+    if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
+  }
+  else if(LoadInst *ldInst = dyn_cast<LoadInst>(nextPtr)){
+    Value *obj = ldInst->getOperand(0);
+    if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
+  }
+
+  //shouldn't reach here...
+  return nullptr;
+}
+
 bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
                                  gep_type_iterator E, bool accessMemory) {
   // If there are no indices, just print out the pointer.
@@ -6485,6 +6543,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
   Type *IntoT = I.getIndexedType();
   Value *FirstOp = I.getOperand();
 
+  bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
   //first index
   if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
     //if it's a struct or array, whether it's pointer or not, first index is offset and zero can be eliminated
@@ -6503,18 +6562,30 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
-      if(NegOpnd.find(FirstOp) != NegOpnd.end()){
-        Out << "*(";
+      errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
+      if(currValue2DerefCnt.second){
+        currValue2DerefCnt.second--;
+        if(NegOpnd.find(FirstOp) != NegOpnd.end()){
+          Out << "*(";
+          writeOperandInternal(Ptr);
+          Out << '+';
+          writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+          Out << ')';
+        }
+        else{
+          writeOperandInternal(Ptr);
+          Out << '[';
+          writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+          Out << ']';
+        }
+        currGEPisPointer = false;
+      }
+      else{
+        Out << '(';
         writeOperandInternal(Ptr);
         Out << '+';
         writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
         Out << ')';
-      }
-      else{
-        writeOperandInternal(Ptr);
-        Out << '[';
-        writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
-        Out << ']';
       }
     }
     else{
@@ -6536,7 +6607,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   I++;
 
-  bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
   //check if previous GEP operand is a pointer
   bool prevGEPisPointer = false;
   if(GetElementPtrInst *prevGEP = dyn_cast<GetElementPtrInst>(Ptr)){
@@ -6552,19 +6622,40 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     Value *Opnd = I.getOperand();
     if(isa<ArrayType>(prevType)){
       if(accessMemory){
-        Out << '[';
-        writeOperandWithCast(Opnd, Instruction::GetElementPtr);
-        Out << ']';
+        errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
+        if(currValue2DerefCnt.second){
+          currValue2DerefCnt.second--;
+          Value *UO = findUnderlyingObject(Ptr);
+          errs() << "SUSAN: dereferencing " << *UO << "\n";
+          Out << '[';
+          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+          Out << ']';
+        }
+        else{
+          assert( 0 && "SUSAN: dereferencing more than expected?\n");
+        }
+        isPointer = false;
       } else if(!isConstantNull(Opnd)) {
+        errs() << "SUSAN: Opnd\n";
         assert(0 && "not supported pointer operation beyond first level\n");
       }
     }
     else if(isa<StructType>(prevType)){
       if(accessMemory){
-        if(isPointer)
-          Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
-        else
-          Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
+        errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
+        if(currValue2DerefCnt.second){
+          currValue2DerefCnt.second--;
+          Value *UO = findUnderlyingObject(Ptr);
+          errs() << "SUSAN: dereferencing " << *UO << "\n";
+          if(isPointer)
+            Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
+          else
+            Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
+        }
+        else{
+          assert( 0 && "SUSAN: dereferencing more than expected?\n");
+        }
+        isPointer = false;
       } else if(!isConstantNull(Opnd)) {
         assert(0 && "not supported pointer operation beyond first level\n");
       }
@@ -6572,7 +6663,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     else{
       assert(0 && "vector type not supported\n");
     }
-    isPointer = false;
     prevType = I.getIndexedType();
   }
 
@@ -6781,10 +6871,13 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   //}
 
   GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
+  Value *UO = findUnderlyingObject(gepInst);
+  currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
   while (gepInst){
     accessGEPMemory.insert(gepInst);
     gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
   }
+
 
   //bool IsUnaligned =
   //    Alignment && Alignment < TD->getABITypeAlignment(OperandType);
@@ -6909,6 +7002,7 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
 //      prevGEPisPointer = true;
 //  }
 
+  errs() << "SUSAN: GEP: " << I << "\n";
   bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
   if(currGEPisPointer)GEPPointers.insert(&I);
 }

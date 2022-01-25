@@ -72,7 +72,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<GetElementPtrInst*> accessGEPMemory;
   std::set<GetElementPtrInst*> GEPPointers;
   std::set<GetElementPtrInst*> NoneArrayGEPs;
-  // BBs controled by splitted BBs can be printed more than once
+  std::map<Value*, int> Times2Dereference;
+  std::pair<Value*,int> currValue2DerefCnt;
 
   // SUSAN: PDT
   PostDominatorTree *PDT = nullptr;
@@ -278,6 +279,8 @@ private:
   void emitSwitchBlock(BasicBlock* start, BasicBlock *brBlockk);
   bool GEPAccessesMemory(GetElementPtrInst *I);
   void collectNoneArrayGEPs(Function &F);
+  void collectVariables2Deref(Function &F);
+  Value* findUnderlyingObject(Value *Ptr);
 
 
   void writeOperandDeref(Value *Operand);
