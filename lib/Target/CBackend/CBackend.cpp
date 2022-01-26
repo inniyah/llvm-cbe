@@ -291,6 +291,24 @@ void CWriter::collectVariables2Deref(Function &F){
       }
     }
   }
+
+
+  //add global variables to dereftable
+  //FIXME: only need to do it once...
+  Module *M = F.getParent();
+  for (Module::global_iterator I = M->global_begin(), E = M->global_end();
+        I != E; ++I) {
+      GlobalVariable* glob = &*I;
+      if(glob->hasInitializer()){
+        errs() << "SUSAN: initializer " << *(glob->getInitializer()) << "\n";
+        Constant *globVal = glob->getInitializer();
+        Type *globTy = globVal->getType();
+        if(isa<ArrayType>(globTy) || isa<StructType>(globTy) || isa<PointerType>(globTy)){
+          findVariableDepth(globTy, cast<Value>(glob));
+        }
+      }
+  }
+
 }
 
 void CWriter::collectNoneArrayGEPs(Function &F){
@@ -2799,12 +2817,6 @@ void CWriter::generateHeader(Module &M) {
     Out << ";\n";
   }
 
-  //SUSAN: add global variables into dereference records
-  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-        I != E; ++I) {
-      GlobalVariable* inst = &*I;
-      errs() << "SUSAN: global variable: " << *inst << "\n";
-  }
 
   // Output the global variable definitions and contents...
   if (!M.global_empty()) {
