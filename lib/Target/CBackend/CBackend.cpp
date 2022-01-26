@@ -6630,7 +6630,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
   //first index
-  if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT) || isa<PointerType>(IntoT)){
+  if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
     //if it's a struct or array, whether it's pointer or not, first index is offset and zero can be eliminated
     if(!isConstantNull(FirstOp)){
       Out << '(';
@@ -6643,7 +6643,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       writeOperandInternal(Ptr);
     }
   }
-  else if(isa<IntegerType>(IntoT)){
+  else if(isa<IntegerType>(IntoT) || isa<PointerType>(IntoT)){
     //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
