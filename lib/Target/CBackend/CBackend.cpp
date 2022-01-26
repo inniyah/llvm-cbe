@@ -296,6 +296,12 @@ void CWriter::collectVariables2Deref(Function &F){
         }
       }
     }
+    else{
+      Type *instTy = (*I).getType();
+      if(isa<PointerType>(instTy) || isa<StructType>(instTy) || isa<ArrayType>(instTy)){
+        findVariableDepth(instTy, cast<Value>(&*I), 0);
+      }
+    }
   }
 
 
@@ -310,7 +316,6 @@ void CWriter::collectVariables2Deref(Function &F){
            I != E; ++I) {
          GlobalVariable* glob = &*I;
          if(glob->hasInitializer()){
-           errs() << "SUSAN: initializer " << *(glob->getInitializer()) << "\n";
            Constant *globVal = glob->getInitializer();
            Type *globTy = globVal->getType();
            if(isa<ArrayType>(globTy) || isa<StructType>(globTy) || isa<PointerType>(globTy)){
@@ -322,6 +327,8 @@ void CWriter::collectVariables2Deref(Function &F){
 
   collected = true;
 
+
+  //collect phi nodes that might be pointers/array/structs
 }
 
 void CWriter::collectNoneArrayGEPs(Function &F){
@@ -347,6 +354,7 @@ void CWriter::collectNoneArrayGEPs(Function &F){
     CheckAndAddArrayGep2NoneArrayGEPs(gep, NoneArrayGEPs);
     collectNoneArrayGEPsDownStream(gep, NoneArrayGEPs);
   }
+
 
 }
 
