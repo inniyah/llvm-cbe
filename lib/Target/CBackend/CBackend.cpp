@@ -246,7 +246,9 @@ void CheckAndAddArrayGep2NoneArrayGEPs(GetElementPtrInst *gepInst, std::set<GetE
 }
 
 
-void CWriter::findVariableDepth(Type *Ty, Value *UO){
+void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
+  if(++depths > 20) return;
+
   if(Times2Dereference.find(cast<Value>(UO)) == Times2Dereference.end())
     Times2Dereference[cast<Value>(UO)] = 1;
   else
@@ -255,19 +257,19 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO){
   if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
     Type *nextTy = ptrTy->getPointerElementType();
     if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
-      findVariableDepth(nextTy, UO);
+      findVariableDepth(nextTy, UO, depths);
   }
   else if(ArrayType *arrTy = dyn_cast<ArrayType>(Ty)){
     Type *nextTy = arrTy->getArrayElementType();
     if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
-      findVariableDepth(nextTy, UO);
+      findVariableDepth(nextTy, UO, depths);
   }
   else if(StructType *strucTy = dyn_cast<StructType>(Ty)){
     for (StructType::element_iterator I = strucTy->element_begin(),
                               E = strucTy->element_end(); I != E; ++I) {
       Type *nextTy = *I;
       if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
-        findVariableDepth(nextTy, UO);
+        findVariableDepth(nextTy, UO, depths);
     }
   }
 }
@@ -280,34 +282,45 @@ void CWriter::collectVariables2Deref(Function &F){
 
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
       Type *allocTy = AI->getAllocatedType();
-      if(isa<PointerType>(allocTy) || isa<StructType>(allocTy) || isa<ArrayType>(allocTy))
-        findVariableDepth(allocTy, cast<Value>(&*I));
+      if(isa<PointerType>(allocTy) || isa<StructType>(allocTy) || isa<ArrayType>(allocTy)){
+        errs() << "SUSAN: finding depth of : " << *I << "\n";
+        findVariableDepth(allocTy, cast<Value>(&*I), 0);
+      }
     }
     else if(CallInst *CI = dyn_cast<CallInst>(&*I)){
       if(Function *func = CI->getCalledFunction()){
         StringRef funcName = func->getName();
-        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc")
-          findVariableDepth(CI->getType(), cast<Value>(&*I));
+        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
+          errs() << "SUSAN: finding depth of : " << *I << "\n";
+          findVariableDepth(CI->getType(), cast<Value>(&*I), 0);
+        }
       }
     }
   }
 
 
+  static bool collected = false;
   //add global variables to dereftable
   //FIXME: only need to do it once...
-  Module *M = F.getParent();
-  for (Module::global_iterator I = M->global_begin(), E = M->global_end();
-        I != E; ++I) {
-      GlobalVariable* glob = &*I;
-      if(glob->hasInitializer()){
-        errs() << "SUSAN: initializer " << *(glob->getInitializer()) << "\n";
-        Constant *globVal = glob->getInitializer();
-        Type *globTy = globVal->getType();
-        if(isa<ArrayType>(globTy) || isa<StructType>(globTy) || isa<PointerType>(globTy)){
-          findVariableDepth(globTy, cast<Value>(glob));
-        }
-      }
+  //
+
+  if(!collected){
+     Module *M = F.getParent();
+     for (Module::global_iterator I = M->global_begin(), E = M->global_end();
+           I != E; ++I) {
+         GlobalVariable* glob = &*I;
+         if(glob->hasInitializer()){
+           errs() << "SUSAN: initializer " << *(glob->getInitializer()) << "\n";
+           Constant *globVal = glob->getInitializer();
+           Type *globTy = globVal->getType();
+           if(isa<ArrayType>(globTy) || isa<StructType>(globTy) || isa<PointerType>(globTy)){
+             findVariableDepth(globTy, cast<Value>(glob), 0);
+           }
+         }
+     }
   }
+
+  collected = true;
 
 }
 
@@ -4131,7 +4144,7 @@ void CWriter::printFunction(Function &F) {
   for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
     Type *argTy = arg->getType();
     if(isa<ArrayType>(argTy) || isa<PointerType>(argTy) || isa<StructType>(argTy)){
-      findVariableDepth(argTy, cast<Value>(arg));
+      findVariableDepth(argTy, cast<Value>(arg), 0);
     }
   }
 
@@ -6609,7 +6622,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
   //first index
-  if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
+  if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT) || isa<PointerType>(IntoT)){
     //if it's a struct or array, whether it's pointer or not, first index is offset and zero can be eliminated
     if(!isConstantNull(FirstOp)){
       Out << '(';
