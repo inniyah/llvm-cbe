@@ -1304,11 +1304,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     case Instruction::GetElementPtr:
     {
       Out << "(";
-      errs() << "SUSAN: printing CPV: " << *CPV << "\n";
-      for (auto it = gep_type_begin(CPV); it != gep_type_end(CPV); ++it) {
-        Type *IntoT = it.getIndexedType();
-        errs() << "INTO TYPE: " << *IntoT << "\n";
-      }
+      Value *UO = findUnderlyingObject(CE);
       printGEPExpressionStruct(CE->getOperand(0), gep_type_begin(CPV), gep_type_end(CPV));
       Out << ")";
       return;
@@ -6505,26 +6501,44 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 
 Value* CWriter::findUnderlyingObject(Value *Ptr){
   if(!Ptr) return Ptr;
-  if(!isa<GetElementPtrInst>(Ptr)) return Ptr;
+  if(!(isa<GetElementPtrInst>(Ptr) || isa<ConstantExpr>(Ptr)))
+      return nullptr;
 
-  Value *nextPtr = Ptr;
-  while(GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(nextPtr)){
-    nextPtr = gepInst->getPointerOperand();
-  }
+  if(isa<GetElementPtrInst>(Ptr)){
+    Value *nextPtr = Ptr;
+    while(GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(nextPtr)){
+      nextPtr = gepInst->getPointerOperand();
+    }
 
-  if(Times2Dereference.find(nextPtr) != Times2Dereference.end()) return nextPtr;
+    if(Times2Dereference.find(nextPtr) != Times2Dereference.end()) return nextPtr;
 
-  if(CastInst *castInst= dyn_cast<CastInst>(nextPtr)){
-    Value *obj = castInst->getOperand(0);
-    if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
-  }
-  else if(LoadInst *ldInst = dyn_cast<LoadInst>(nextPtr)){
-    Value *obj = ldInst->getOperand(0);
-    if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
+    if(CastInst *castInst= dyn_cast<CastInst>(nextPtr)){
+      Value *obj = castInst->getOperand(0);
+      if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
+    }
+    else if(LoadInst *ldInst = dyn_cast<LoadInst>(nextPtr)){
+      Value *obj = ldInst->getOperand(0);
+      if(Times2Dereference.find(obj) != Times2Dereference.end()) return obj;
+    }
+
+
+  } else {
+    ConstantExpr *expr = dyn_cast<ConstantExpr>(Ptr);
+    Value *UO = nullptr;
+    assert(expr && "SUSAN: finding UO of a non GEP constant expression?\n");
+
+    while(expr && expr->getOpcode() == Instruction::GetElementPtr){
+      UO = expr->getOperand(0);
+      expr =  dyn_cast<ConstantExpr>(UO);
+    }
+
+    if(Times2Dereference.find(UO) != Times2Dereference.end()) return UO;
   }
 
   //shouldn't reach here...
   return nullptr;
+
+
 }
 
 bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
