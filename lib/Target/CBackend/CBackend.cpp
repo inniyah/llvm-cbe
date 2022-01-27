@@ -743,7 +743,7 @@ CWriter::printTypeName(raw_ostream &Out, Type *Ty, bool isSigned,
   }
 
   case Type::ArrayTyID: {
-    TypedefDeclTypes.insert(Ty);
+    //TypedefDeclTypes.insert(Ty);
     Type *elTy = Ty->getArrayElementType();
     return printTypeName(Out, elTy, false);
     //return Out << getArrayName(cast<ArrayType>(Ty));
