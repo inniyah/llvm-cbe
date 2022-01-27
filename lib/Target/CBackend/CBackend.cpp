@@ -6643,7 +6643,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       writeOperandInternal(Ptr);
     }
   }
-  else if(isa<IntegerType>(IntoT) || isa<PointerType>(IntoT)){
+  else if(isa<IntegerType>(IntoT) || isa<PointerType>(IntoT) || IntoT->isDoubleTy() || IntoT->isFloatTy()){
     //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
