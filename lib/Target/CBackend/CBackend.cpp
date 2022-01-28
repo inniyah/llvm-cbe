@@ -6599,7 +6599,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     bool dereferenced = false;
     auto it = I;
     Type *idxType = it.getIndexedType();
-    if(isa<StructType>(idxType) && (++it != E)){
+    if((isa<StructType>(idxType) || isa<ArrayType>(idxType)) && (++it != E)){
       dereferenced = true;
     }
     /*GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Ptr);
@@ -6712,7 +6712,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     //IntoT = I.getIndexedType();
     Value *Opnd = I.getOperand();
     if(isa<ArrayType>(prevType)){
-      if(accessMemory){
+      //if(accessMemory){
         errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
@@ -6724,10 +6724,11 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         else{
           assert( 0 && "SUSAN: dereferencing more than expected?\n");
         }
-      } else if(!isConstantNull(Opnd)) {
-        Out << '+';
-        writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
-      }
+      //} else if(!isConstantNull(Opnd)) {
+      //  Out << '+';
+      //  writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
+      //  isPointer = true;
+      //}
     }
     else if(isa<StructType>(prevType)){
       if(accessMemory){
