@@ -6602,6 +6602,12 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     if((isa<StructType>(idxType) || isa<ArrayType>(idxType)) && (++it != E)){
       dereferenced = true;
     }
+    it = I;
+    if(isa<ArrayType>(idxType)){
+      it++;
+      if(!isConstantNull(it.getOperand()))
+        dereferenced = true;
+    }
     /*GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Ptr);
     while(gepInst){
       it = gep_type_begin(gepInst);
