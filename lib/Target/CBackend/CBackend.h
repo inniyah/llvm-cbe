@@ -288,7 +288,7 @@ private:
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
                     enum OperandContext Context = ContextNormal, bool startExpression = true);
-  void writeInstComputationInline(Instruction &I);
+  void writeInstComputationInline(Instruction &I, bool startExpression=true);
   void writeOperandInternal(Value *Operand,
                             enum OperandContext Context = ContextNormal, bool startExpression = true);
   void writeOperandWithCast(Value *Operand, unsigned Opcode, bool startExpression = true);

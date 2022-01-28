@@ -277,31 +277,9 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
 void CWriter::collectVariables2Deref(Function &F){
   // SUSAN: build the table of local variable : times to be dereferenced
   // GEP might not be directly connected to a site
-  //  change this!!
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
-
-    if (AllocaInst *AI = dyn_cast<AllocaInst>(&*I)) {
-      Type *allocTy = AI->getAllocatedType();
-      if(isa<PointerType>(allocTy) || isa<StructType>(allocTy) || isa<ArrayType>(allocTy)){
-        errs() << "SUSAN: finding depth of : " << *I << "\n";
-        findVariableDepth(allocTy, cast<Value>(&*I), 0);
-      }
-    }
-    else if(CallInst *CI = dyn_cast<CallInst>(&*I)){
-      if(Function *func = CI->getCalledFunction()){
-        StringRef funcName = func->getName();
-        //if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
-          errs() << "SUSAN: finding depth of : " << *I << "\n";
-          findVariableDepth(CI->getType(), cast<Value>(&*I), 0);
-        //}
-      }
-    }
-    else{
-      Type *instTy = (*I).getType();
-      if(isa<PointerType>(instTy) || isa<StructType>(instTy) || isa<ArrayType>(instTy)){
-        findVariableDepth(instTy, cast<Value>(&*I), 0);
-      }
-    }
+    Type *instTy = (*I).getType();
+    findVariableDepth(instTy, cast<Value>(&*I), 0);
   }
 
 
@@ -1895,7 +1873,8 @@ std::string CWriter::GetValueName(Value *Operand) {
 
 /// writeInstComputationInline - Emit the computation for the specified
 /// instruction inline, with no destination provided.
-void CWriter::writeInstComputationInline(Instruction &I) {
+void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
+  gepStart = startExpression;
   // C can't handle non-power-of-two integer types
   unsigned mask = 0;
   Type *Ty = I.getType();
@@ -1928,8 +1907,7 @@ void CWriter::writeOperandInternal(Value *Operand,
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
       Out << '(';
-      gepStart = startExpression;
-      writeInstComputationInline(*I);
+      writeInstComputationInline(*I, startExpression);
       Out << ')';
       return;
     }
@@ -6537,7 +6515,8 @@ void CWriter::visitAllocaInst(AllocaInst &I) {
 Value* CWriter::findUnderlyingObject(Value *Ptr){
   if(!Ptr) return Ptr;
   if(!(isa<GetElementPtrInst>(Ptr) || isa<ConstantExpr>(Ptr)))
-      return nullptr;
+    if(Times2Dereference.find(Ptr) != Times2Dereference.end())
+      return Ptr;
 
   if(isa<GetElementPtrInst>(Ptr)){
     Value *nextPtr = Ptr;
@@ -6607,6 +6586,11 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     Out << ")(";
   }
 
+
+  if(gepStart){
+    Value *UO = findUnderlyingObject(Ptr);
+    currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
+  }
 
   if(!accessMemory && gepStart){
     //check every gep whether there is a deference operation
@@ -6974,8 +6958,7 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
 
   if(gepInst){
-    Value *UO = findUnderlyingObject(gepInst);
-    currValue2DerefCnt = std::pair(UO, Times2Dereference[UO]);
+
     while (gepInst){
       accessGEPMemory.insert(gepInst);
       gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
@@ -7140,6 +7123,7 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
 //  }
 
   errs() << "SUSAN: GEP: " << I << "\n";
+
   bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
   if(currGEPisPointer)GEPPointers.insert(&I);
 }
