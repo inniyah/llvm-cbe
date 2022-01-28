@@ -6616,7 +6616,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     if(isa<StructType>(idxType) && (++it != E)){
       dereferenced = true;
     }
-    GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Ptr);
+    /*GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Ptr);
     while(gepInst){
       it = gep_type_begin(gepInst);
       Type *idxType = it.getIndexedType();
@@ -6624,7 +6624,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         dereferenced = true;
       }
       gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
-    }
+    }*/
 
     if(dereferenced)
       Out << '&';
