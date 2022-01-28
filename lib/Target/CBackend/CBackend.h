@@ -74,6 +74,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<GetElementPtrInst*> NoneArrayGEPs;
   std::map<Value*, int> Times2Dereference;
   std::pair<Value*,int> currValue2DerefCnt;
+  bool gepStart;
 
   // SUSAN: PDT
   PostDominatorTree *PDT = nullptr;
@@ -286,11 +287,11 @@ private:
 
   void writeOperandDeref(Value *Operand);
   void writeOperand(Value *Operand,
-                    enum OperandContext Context = ContextNormal);
+                    enum OperandContext Context = ContextNormal, bool startExpression = true);
   void writeInstComputationInline(Instruction &I);
   void writeOperandInternal(Value *Operand,
-                            enum OperandContext Context = ContextNormal);
-  void writeOperandWithCast(Value *Operand, unsigned Opcode);
+                            enum OperandContext Context = ContextNormal, bool startExpression = true);
+  void writeOperandWithCast(Value *Operand, unsigned Opcode, bool startExpression = true);
   void opcodeNeedsCast(unsigned Opcode, bool &shouldCast, bool &castIsSigned);
 
   void writeOperandWithCast(Value *Operand, ICmpInst &I);

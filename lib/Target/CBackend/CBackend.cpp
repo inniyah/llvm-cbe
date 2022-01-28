@@ -1923,11 +1923,12 @@ void CWriter::writeInstComputationInline(Instruction &I) {
 }
 
 void CWriter::writeOperandInternal(Value *Operand,
-                                   enum OperandContext Context) {
+                                   enum OperandContext Context, bool startExpression) {
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
       Out << '(';
+      gepStart = startExpression;
       writeInstComputationInline(*I);
       Out << ')';
       return;
@@ -1942,7 +1943,7 @@ void CWriter::writeOperandInternal(Value *Operand,
     Out << GetValueName(Operand);
 }
 
-void CWriter::writeOperand(Value *Operand, enum OperandContext Context) {
+void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool startExpression) {
   bool isAddressImplicit = isAddressExposed(Operand);
   // Global variables are referenced as their addresses by llvm
   if (isAddressImplicit) {
@@ -1955,7 +1956,7 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context) {
       Out << "((void*)&";
   }
 
-  writeOperandInternal(Operand, Context);
+  writeOperandInternal(Operand, Context, startExpression);
 
   if (isAddressImplicit)
     Out << ')';
@@ -2047,7 +2048,7 @@ void CWriter::opcodeNeedsCast(
   }
 }
 
-void CWriter::writeOperandWithCast(Value *Operand, unsigned Opcode) {
+void CWriter::writeOperandWithCast(Value *Operand, unsigned Opcode, bool startExpression) {
   // Write out the casted operand if we should, otherwise just write the
   // operand.
 
@@ -2061,10 +2062,10 @@ void CWriter::writeOperandWithCast(Value *Operand, unsigned Opcode) {
     Out << "((";
     printSimpleType(Out, OpTy, castIsSigned);
     Out << ")";
-    writeOperand(Operand, ContextCasted);
+    writeOperand(Operand, ContextCasted, startExpression);
     Out << ")";
   } else
-    writeOperand(Operand, ContextCasted);
+    writeOperand(Operand, ContextCasted, startExpression);
 }
 
 // Write the operand with a cast to another type based on the icmp predicate
@@ -5036,8 +5037,9 @@ void CWriter::visitBranchInst(BranchInst &I) {
             cast<Instruction>(I) != exitBB->getTerminator();
             ++I){
           Instruction *II = cast<Instruction>(I);
-          if (!isInlinableInst(*II) && !isDirectAlloca(&*II))
+          if (!isInlinableInst(*II) && !isDirectAlloca(&*II)){
             printInstruction(II);
+          }
         }
         times2bePrinted[exitBB]--;
         //printedBBs.insert(exitBB);
@@ -6606,12 +6608,26 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
   }
 
 
-  if(!accessMemory){
-    //check if adding & is needed
+  if(!accessMemory && gepStart){
+    //check every gep whether there is a deference operation
+    bool dereferenced = false;
     auto it = I;
-    if(isa<StructType>(it.getIndexedType()) && (++it != E)){
-      Out << '&';
+    Type *idxType = it.getIndexedType();
+    if(isa<StructType>(idxType) && (++it != E)){
+      dereferenced = true;
     }
+    GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Ptr);
+    while(gepInst){
+      it = gep_type_begin(gepInst);
+      Type *idxType = it.getIndexedType();
+      if(isa<StructType>(idxType) && (++it != E)){
+        dereferenced = true;
+      }
+      gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
+    }
+
+    if(dereferenced)
+      Out << '&';
   }
 
   std::set<Value*>NegOpnd;
@@ -6634,13 +6650,13 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     //if it's a struct or array, whether it's pointer or not, first index is offset and zero can be eliminated
     if(!isConstantNull(FirstOp)){
       Out << '(';
-      writeOperandInternal(Ptr);
+      writeOperandInternal(Ptr, ContextNormal, false);
       Out << '+';
-      writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+      writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
       Out << ')';
     }
     else{
-      writeOperandInternal(Ptr);
+      writeOperandInternal(Ptr, ContextNormal, false);
     }
   }
   else if(isa<IntegerType>(IntoT) || isa<PointerType>(IntoT) || IntoT->isDoubleTy() || IntoT->isFloatTy()){
@@ -6652,24 +6668,24 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         currValue2DerefCnt.second--;
         if(NegOpnd.find(FirstOp) != NegOpnd.end()){
           Out << "*(";
-          writeOperandInternal(Ptr);
+          writeOperandInternal(Ptr, ContextNormal, false);
           Out << '+';
-          writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+          writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
           Out << ')';
         }
         else{
-          writeOperandInternal(Ptr);
+          writeOperandInternal(Ptr, ContextNormal, false);
           Out << '[';
-          writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+          writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
           Out << ']';
         }
         currGEPisPointer = false;
       }
       else{
         Out << '(';
-        writeOperandInternal(Ptr);
+        writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
-        writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+        writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
         Out << ')';
       }
     }
@@ -6678,13 +6694,13 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
       if(!isConstantNull(FirstOp)){
         Out << '(';
-        writeOperandInternal(Ptr);
+        writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
-        writeOperandWithCast(FirstOp, Instruction::GetElementPtr);
+        writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
         Out << ')';
       }
       else{
-        writeOperandInternal(Ptr);
+        writeOperandInternal(Ptr, ContextNormal, false);
       }
 
 
@@ -6715,16 +6731,16 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           Out << '[';
-          writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+          writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
           Out << ']';
+          isPointer = false;
         }
         else{
           assert( 0 && "SUSAN: dereferencing more than expected?\n");
         }
-        isPointer = false;
       } else if(!isConstantNull(Opnd)) {
         Out << '+';
-        writeOperandWithCast(Opnd, Instruction::GetElementPtr);
+        writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
       }
     }
     else if(isa<StructType>(prevType)){
@@ -6736,16 +6752,17 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
             Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
           else
             Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
+          isPointer = false;
         }
         else{
           assert( 0 && "SUSAN: dereferencing more than expected?\n");
         }
-        isPointer = false;
       } else{
         if(isPointer)
           Out << "->field" << cast<ConstantInt>(Opnd)->getZExtValue();
         else
           Out << ".field" << cast<ConstantInt>(Opnd)->getZExtValue();
+        isPointer = false;
       }
     }
     else{
