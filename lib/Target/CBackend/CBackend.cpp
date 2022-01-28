@@ -6712,7 +6712,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     //IntoT = I.getIndexedType();
     Value *Opnd = I.getOperand();
     if(isa<ArrayType>(prevType)){
-      //if(accessMemory){
+      if(accessMemory){
         errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
@@ -6724,11 +6724,18 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         else{
           assert( 0 && "SUSAN: dereferencing more than expected?\n");
         }
-      //} else if(!isConstantNull(Opnd)) {
-      //  Out << '+';
-      //  writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
-      //  isPointer = true;
-      //}
+      } else if(!isConstantNull(Opnd)) {
+        if(currValue2DerefCnt.second){
+          currValue2DerefCnt.second--;
+          Out << '[';
+          writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
+          Out << ']';
+          isPointer = false;
+        }
+        else{
+          assert( 0 && "SUSAN: dereferencing more than expected?\n");
+        }
+      }
     }
     else if(isa<StructType>(prevType)){
       if(accessMemory){
