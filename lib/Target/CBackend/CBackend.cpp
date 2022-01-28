@@ -280,7 +280,7 @@ void CWriter::collectVariables2Deref(Function &F){
   //  change this!!
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
 
-    if (AllocaInst *AI = isDirectAlloca(&*I)) {
+    if (AllocaInst *AI = dyn_cast<AllocaInst>(&*I)) {
       Type *allocTy = AI->getAllocatedType();
       if(isa<PointerType>(allocTy) || isa<StructType>(allocTy) || isa<ArrayType>(allocTy)){
         errs() << "SUSAN: finding depth of : " << *I << "\n";
@@ -290,10 +290,10 @@ void CWriter::collectVariables2Deref(Function &F){
     else if(CallInst *CI = dyn_cast<CallInst>(&*I)){
       if(Function *func = CI->getCalledFunction()){
         StringRef funcName = func->getName();
-        if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
+        //if(funcName == "malloc" || funcName == "calloc" || funcName == "realloc"){
           errs() << "SUSAN: finding depth of : " << *I << "\n";
           findVariableDepth(CI->getType(), cast<Value>(&*I), 0);
-        }
+        //}
       }
     }
     else{
