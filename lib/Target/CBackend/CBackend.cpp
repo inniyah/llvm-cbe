@@ -4504,7 +4504,8 @@ void CWriter::printLoopNew(Loop *L) {
     for (BasicBlock::iterator I = header->begin();
          cast<Instruction>(I) !=  condInst && I != header->end();
          ++I)
-      printInstruction(cast<Instruction>(I));
+        if (!isInlinableInst(*cast<Instruction>(I)))
+          printInstruction(cast<Instruction>(I));
 
     Out << "while (";
     writeOperandWithCast(icmp->getOperand(0), *icmp);
