@@ -6973,12 +6973,12 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
 
   if(gepInst){
-
     while (gepInst){
       accessGEPMemory.insert(gepInst);
       gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
     }
     writeOperandInternal(Operand);
+    accessGEPMemory.clear();
     return;
   }
 
