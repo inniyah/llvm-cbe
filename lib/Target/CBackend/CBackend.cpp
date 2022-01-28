@@ -4504,7 +4504,7 @@ void CWriter::printLoopNew(Loop *L) {
     for (BasicBlock::iterator I = header->begin();
          cast<Instruction>(I) !=  condInst && I != header->end();
          ++I)
-        if (!isInlinableInst(*cast<Instruction>(I)))
+        if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
           printInstruction(cast<Instruction>(I));
 
     Out << "while (";
@@ -4544,7 +4544,8 @@ void CWriter::printLoopNew(Loop *L) {
     for (BasicBlock::iterator I = L->getHeader()->begin();
         cast<Instruction>(I) !=  condInst && I != L->getHeader()->end();
         ++I){
-      printInstruction(cast<Instruction>(I));
+      if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
+        printInstruction(cast<Instruction>(I));
     }
   }
 
