@@ -268,7 +268,9 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
     for (StructType::element_iterator I = strucTy->element_begin(),
                               E = strucTy->element_end(); I != E; ++I) {
       Type *nextTy = *I;
-      if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
+      if(nextTy == Ty)//recursive case
+        Times2Dereference[UO] = 20;
+      else if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
         findVariableDepth(nextTy, UO, depths);
     }
   }
