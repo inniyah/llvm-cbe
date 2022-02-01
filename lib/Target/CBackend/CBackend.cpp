@@ -346,8 +346,10 @@ bool CWriter::runOnFunction(Function &F) {
     return false;
 
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  // SUSAN: add post dominator
+  // SUSAN: add post dominator & region info
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
+  RI->dump();
 
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
@@ -1323,7 +1325,6 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     case Instruction::GetElementPtr:
     {
       Out << "(";
-      Value *UO = findUnderlyingObject(CE);
       printGEPExpressionStruct(CE->getOperand(0), gep_type_begin(CPV), gep_type_end(CPV));
       Out << ")";
       return;
@@ -3706,7 +3707,6 @@ void CWriter::markLoopIrregularExits(Function &F){
     L->getExitEdges(ExitEdges);
     for(auto edge : ExitEdges){
       BasicBlock *exitingBB = edge.first;
-      BasicBlock *exitBB = edge.second;
       if(exitingBB != L->getHeader()){
         irregularLoopExits.insert(edge);
       }
@@ -6656,7 +6656,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
-      errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
       if(currValue2DerefCnt.second){
         currValue2DerefCnt.second--;
         if(NegOpnd.find(FirstOp) != NegOpnd.end()){
@@ -6720,7 +6719,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     Value *Opnd = I.getOperand();
     if(isa<ArrayType>(prevType)){
       if(accessMemory){
-        errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           Out << '[';
@@ -7139,7 +7137,6 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
 //      prevGEPisPointer = true;
 //  }
 
-  errs() << "SUSAN: GEP: " << I << "\n";
 
   bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
   if(currGEPisPointer)GEPPointers.insert(&I);

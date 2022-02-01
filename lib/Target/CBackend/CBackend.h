@@ -42,6 +42,7 @@
 
 // SUSAN ADDED LIBS
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/Analysis/RegionInfo.h"
 
 namespace llvm_cbe {
 
@@ -78,6 +79,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
   // SUSAN: PDT
   PostDominatorTree *PDT = nullptr;
+  RegionInfo *RI = nullptr;
 
   std::string _Out;
   std::string _OutHeaders;
@@ -202,6 +204,7 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
+    AU.addRequired<RegionInfoPass>();
     AU.setPreservesCFG();
   }
 
