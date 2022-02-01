@@ -273,7 +273,7 @@ private:
   };
 
   // SUSAN: added functions
-  void emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherBlock);
+  void emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherBlock, Region *R);
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);

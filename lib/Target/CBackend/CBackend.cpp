@@ -350,7 +350,6 @@ bool CWriter::runOnFunction(Function &F) {
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
   RI->dump();
-
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
 
@@ -4843,57 +4842,87 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
     }
 }
 
-void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart){
+void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, Region *R){
     //errs() << "========= Start emitting a branch  ========\n";
     //errs() << *start << "\n";
     //errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
-    std::set<BasicBlock*> visited;
+    //std::set<BasicBlock*> visited;
+    //std::queue<BasicBlock*> toVisit;
+    //visited.insert(start);
+    //toVisit.push(start);
+
+    BasicBlock *exitBB = R->getExit();
+
     std::queue<BasicBlock*> toVisit;
-    visited.insert(start);
+    std::set<BasicBlock*> visited;
     toVisit.push(start);
-
-
+    visited.insert(start);
     while(!toVisit.empty()){
-      BasicBlock *currBB = toVisit.front();
+	    BasicBlock *currBB = toVisit.front();
+	    toVisit.pop();
 
-      // TODO: need a systematic way to check when does a branch end
-      // currently just adding patches here and there
-      // e.x.,: currBB == otherStart is added from supermutation
-      if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
-        break;
-      }
-
-      // splitted blocks, their controled blocks can be printed >1 times
-      bool printLabel = true;
-      if(splittedBBs.find(brBlock) != splittedBBs.end()){
-        //printedBBs.erase(currBB);
-        printLabel = false;
-      }
+      if(currBB == exitBB) break;
 
       if(!times2bePrinted[currBB]){
         toVisit.pop();
         continue;
       }
-      //if(printedBBs.find(currBB) != printedBBs.end()){
-        //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
-        //toVisit.pop();
-        //continue;
-      //}
 
-      printBasicBlock(currBB, printLabel);
-      times2bePrinted[currBB]--;
-      //printedBBs.insert(currBB);
-
-      toVisit.pop();
-
-      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-          BasicBlock *succBB = *succ;
-          if(visited.find(succBB)==visited.end()){
-            visited.insert(succBB);
-            toVisit.push(succBB);
-          }
+      if(R->contains(currBB)){
+        printBasicBlock(currBB);
+        times2bePrinted[currBB]--;
       }
+
+	    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+		  BasicBlock *succBB = *succ;
+		    if(visited.find(succBB)==visited.end()){
+			    visited.insert(succBB);
+			    toVisit.push(succBB);
+		    }
+	    }
     }
+
+  //  while(!toVisit.empty()){
+  //    BasicBlock *currBB = toVisit.front();
+
+  //    // TODO: need a systematic way to check when does a branch end
+  //    // currently just adding patches here and there
+  //    // e.x.,: currBB == otherStart is added from supermutation
+  //    if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
+  //      break;
+  //    }
+
+  //    // splitted blocks, their controled blocks can be printed >1 times
+  //    bool printLabel = true;
+  //    if(splittedBBs.find(brBlock) != splittedBBs.end()){
+  //      //printedBBs.erase(currBB);
+  //      printLabel = false;
+  //    }
+
+  //    if(!times2bePrinted[currBB]){
+  //      toVisit.pop();
+  //      continue;
+  //    }
+  //    //if(printedBBs.find(currBB) != printedBBs.end()){
+  //      //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+  //      //toVisit.pop();
+  //      //continue;
+  //    //}
+
+  //    printBasicBlock(currBB, printLabel);
+  //    times2bePrinted[currBB]--;
+  //    //printedBBs.insert(currBB);
+
+  //    toVisit.pop();
+
+  //    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+  //        BasicBlock *succBB = *succ;
+  //        if(visited.find(succBB)==visited.end()){
+  //          visited.insert(succBB);
+  //          toVisit.push(succBB);
+  //        }
+  //    }
+  //  }
     //errs() << "========= End emitting a branch  ========\n";
 }
 
@@ -4953,6 +4982,8 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 void CWriter::visitBranchInst(BranchInst &I) {
   CurInstr = &I;
 
+
+
   if(!I.isConditional()){
     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
@@ -4978,7 +5009,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
   //If structure 2 : one branch is branching to a basic block that has return stmt
   BasicBlock *trueStartBB = I.getSuccessor(0);
   BasicBlock *falseStartBB = I.getSuccessor(1);
-
   bool exitFunctionTrueBr = isExitingFunction(trueStartBB);
   bool exitFunctionFalseBr = isExitingFunction(falseStartBB);
 
@@ -5049,10 +5079,20 @@ void CWriter::visitBranchInst(BranchInst &I) {
   }
 
 
+  Region *brRegion = RI->getRegionFor(I.getParent());
+  errs() << "===================\nSUSAN: branch: " << I << "\n";
+  errs() << "belongs to region: " << brRegion << "\n";
+  errs() << "blocks belong to the same region: \n";
+  for (Region::block_iterator I = brRegion->block_begin(), E = brRegion->block_end(); I != E; ++I){
+    BasicBlock *bb = cast<BasicBlock>(*I);
+    errs() << *bb << "\n";
+  }
+  errs() << "==================\n";
+
     //Case 2: only print if body
     if(trueBrOnly){
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(trueStartBB, brBB, falseStartBB);
+      emitIfBlock(trueStartBB, brBB, falseStartBB, brRegion);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
       if(ret && ret != trueStartBB){
@@ -5063,7 +5103,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
     //Case 3: only print if body with reveresed case
     else if(falseBrOnly){
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(falseStartBB, brBB, trueStartBB);
+      emitIfBlock(falseStartBB, brBB, trueStartBB, brRegion);
 
       BasicBlock *ret = isExitingFunction(falseStartBB);
       if(ret && ret != falseStartBB){
@@ -5074,10 +5114,10 @@ void CWriter::visitBranchInst(BranchInst &I) {
     //Case 4: print if & else;
     else{
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(trueStartBB, brBB, falseStartBB);
+      emitIfBlock(trueStartBB, brBB, falseStartBB, brRegion);
       Out << "  } else {\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(falseStartBB, brBB, trueStartBB);
+      emitIfBlock(falseStartBB, brBB, trueStartBB, brRegion);
     }
 
     Out << "}\n";
