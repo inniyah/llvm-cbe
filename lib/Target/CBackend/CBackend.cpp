@@ -4842,6 +4842,37 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
     }
 }
 
+void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
+      std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
+
+  visited.insert(fromBB);
+  path.insert(fromBB);
+
+  if(fromBB == toBB){
+    if(path.find(avoidBB) == path.end())
+      foundPathWithoutC = true;
+  }
+  else{
+    for (auto succ = succ_begin(fromBB); succ != succ_end(fromBB); ++succ){
+      BasicBlock *succBB = *succ;
+      if(visited.find(succBB) == visited.end())
+        directPathFromAtoBwithoutC(succBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+    }
+  }
+  visited.erase(fromBB);
+}
+
+bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
+  std::set<BasicBlock*> visited;
+  std::set<BasicBlock*> path;
+  bool foundPathWithoutC = false;
+
+  //if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
+
+  directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+  return foundPathWithoutC;
+}
+
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, Region *R){
     //errs() << "========= Start emitting a branch  ========\n";
     //errs() << *start << "\n";
@@ -4851,36 +4882,18 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     //visited.insert(start);
     //toVisit.push(start);
 
-    BasicBlock *exitBB = R->getExit();
+  BasicBlock *exitBB = R->getExit();
 
-    std::queue<BasicBlock*> toVisit;
-    std::set<BasicBlock*> visited;
-    toVisit.push(start);
-    visited.insert(start);
-    while(!toVisit.empty()){
-	    BasicBlock *currBB = toVisit.front();
-	    toVisit.pop();
+  for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
+    BasicBlock *currBB = cast<BasicBlock>(*I);
 
-      if(currBB == exitBB) break;
-
-      if(!times2bePrinted[currBB]){
-        toVisit.pop();
-        continue;
-      }
-
-      if(R->contains(currBB)){
-        printBasicBlock(currBB);
-        times2bePrinted[currBB]--;
-      }
-
-	    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-		  BasicBlock *succBB = *succ;
-		    if(visited.find(succBB)==visited.end()){
-			    visited.insert(succBB);
-			    toVisit.push(succBB);
-		    }
-	    }
+    if(directPathFromAtoBwithoutC(start,currBB,exitBB)){
+      errs() << "SUSAN: bb " << *currBB << "\n";
+      errs() << "times2bePrinted " << times2bePrinted[currBB] << "\n";
+      printBasicBlock(currBB);
+      times2bePrinted[currBB]--;
     }
+  }
 
   //  while(!toVisit.empty()){
   //    BasicBlock *currBB = toVisit.front();
@@ -4946,36 +4959,9 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 }
 
 
-void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
-      std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
 
-  visited.insert(fromBB);
-  path.insert(fromBB);
 
-  if(fromBB == toBB){
-    if(path.find(avoidBB) == path.end())
-      foundPathWithoutC = true;
-  }
-  else{
-    for (auto succ = succ_begin(fromBB); succ != succ_end(fromBB); ++succ){
-      BasicBlock *succBB = *succ;
-      if(visited.find(succBB) == visited.end())
-        directPathFromAtoBwithoutC(succBB, toBB, avoidBB, visited, path, foundPathWithoutC);
-    }
-  }
-  visited.erase(fromBB);
-}
 
-bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
-  std::set<BasicBlock*> visited;
-  std::set<BasicBlock*> path;
-  bool foundPathWithoutC = false;
-
-  //if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
-
-  directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
-  return foundPathWithoutC;
-}
 
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
