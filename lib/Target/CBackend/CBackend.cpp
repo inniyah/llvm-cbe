@@ -4573,7 +4573,7 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
-  if(!times2bePrinted[BB]){
+  if(times2bePrinted[BB]<=0){
     //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
   }
@@ -4888,8 +4888,6 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     BasicBlock *currBB = cast<BasicBlock>(*I);
 
     if(directPathFromAtoBwithoutC(start,currBB,exitBB)){
-      errs() << "SUSAN: bb " << *currBB << "\n";
-      errs() << "times2bePrinted " << times2bePrinted[currBB] << "\n";
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
     }
@@ -5066,14 +5064,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
 
 
   Region *brRegion = RI->getRegionFor(I.getParent());
-  errs() << "===================\nSUSAN: branch: " << I << "\n";
-  errs() << "belongs to region: " << brRegion << "\n";
-  errs() << "blocks belong to the same region: \n";
-  for (Region::block_iterator I = brRegion->block_begin(), E = brRegion->block_end(); I != E; ++I){
-    BasicBlock *bb = cast<BasicBlock>(*I);
-    errs() << *bb << "\n";
-  }
-  errs() << "==================\n";
 
     //Case 2: only print if body
     if(trueBrOnly){
@@ -6770,7 +6760,6 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     }
     else if(isa<StructType>(prevType)){
       if(accessMemory){
-        errs() << "SUSAN: dereferencing " << *currValue2DerefCnt.first << "\n";
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           if(isPointer)
