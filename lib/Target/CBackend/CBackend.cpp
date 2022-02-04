@@ -3718,7 +3718,7 @@ void CWriter::markLoopIrregularExits(Function &F){
 
 }
 
-bool headerIsExiting (Loop *L, BranchInst* brInst = nullptr){
+Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr){
   if(!brInst){
     BasicBlock *header = L->getHeader();
     Instruction* term = header->getTerminator();
@@ -3731,13 +3731,20 @@ bool headerIsExiting (Loop *L, BranchInst* brInst = nullptr){
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
     if(exit == L->getHeader()){
-      if(isa<CmpInst>(brInst->getOperand(0)) ||
-         isa<ICmpInst>(brInst->getOperand(0)))
-        return true;
-      else return false;
+      Value *opnd0 = brInst->getOperand(0);
+      Value *opnd1 = brInst->getOperand(1);
+      if(isa<CmpInst>(opnd0) || isa<UnaryInstruction>(opnd0) || isa<BinaryOperator>(opnd0)){
+        negateCondition = false;
+        return cast<Instruction>(opnd0);
+      }
+      else if(isa<CmpInst>(opnd1) || isa<UnaryInstruction>(opnd1) || isa<BinaryOperator>(opnd1)){
+        negateCondition = true;
+        return cast<Instruction>(opnd1);
+      }
+      else return nullptr;
     }
   }
-  return false;
+  return nullptr;
 }
 
 // If branch criterias:
@@ -3754,7 +3761,8 @@ void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
     BranchInst *br = dyn_cast<BranchInst>(term);
     if(br && br->isConditional()){
       Loop *L = LI->getLoopFor(&BB);
-      if(L && L->getHeader() == &BB && headerIsExiting(L))
+      bool negateCondition = false;
+      if(L && L->getHeader() == &BB && headerIsExiting(L, negateCondition))
         continue;
       ifBranches.insert(br);
     }
@@ -4477,19 +4485,19 @@ void CWriter::printLoopNew(Loop *L) {
   BranchInst* brInst = dyn_cast<BranchInst>(term);
 
 
-  bool headerExiting = headerIsExiting(L, brInst);
+  bool negateCondition = false;
+  Instruction *condInst = headerIsExiting(L, negateCondition, brInst);
   // print compare statement
-  if(headerExiting){
+  if(condInst){
   //  assert(brInst && brInst->isConditional() &&
   //    "exit condition is not a conditional branch inst?");
     //search for exit loop condition
-    ICmpInst *icmp;
-    if(CmpInst *cmp = dyn_cast<CmpInst>(brInst->getOperand(0)))
-      icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
-    else icmp = dyn_cast<ICmpInst>(brInst->getOperand(0));
+    //ICmpInst *icmp;
+    //if(CmpInst *cmp = dyn_cast<CmpInst>(condInst))
+    //  icmp = new ICmpInst(cmp->getPredicate(), cmp->getOperand(0), cmp->getOperand(1));
+    //else icmp = dyn_cast<ICmpInst>(condInst);
 
     // print live-in declarations
-    Instruction *condInst = dyn_cast<Instruction>(brInst->getOperand(0));
     for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
       Instruction *inst = cast<Instruction>(I);
       if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
@@ -4508,14 +4516,20 @@ void CWriter::printLoopNew(Loop *L) {
         if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
           printInstruction(cast<Instruction>(I));
 
-    Out << "while (";
-    writeOperandWithCast(icmp->getOperand(0), *icmp);
+    if(!negateCondition) Out << "while (";
+    else Out << "while(!(";
+    //writeOperandWithCast(icmp->getOperand(0), *icmp);
 
-    printCmpOperator(icmp);
+    //printCmpOperator(icmp);
 
-    writeOperandWithCast(icmp->getOperand(1), *icmp);
-    delete(icmp);
-    Out << "){\n";
+    //writeOperandWithCast(icmp->getOperand(1), *icmp);
+
+    writeOperand(condInst);
+
+    //delete(icmp);
+
+    if(!negateCondition) Out << "){\n";
+    else Out << ")){\n}";
   }
   else{
     Out << "while(1){\n";
@@ -4540,8 +4554,7 @@ void CWriter::printLoopNew(Loop *L) {
     }
   }
 
-  if(headerExiting){
-    Instruction *condInst = dyn_cast<Instruction>(brInst->getOperand(0));
+  if(condInst){
     for (BasicBlock::iterator I = L->getHeader()->begin();
         cast<Instruction>(I) !=  condInst && I != L->getHeader()->end();
         ++I){
