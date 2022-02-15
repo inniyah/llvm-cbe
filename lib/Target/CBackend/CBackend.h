@@ -77,7 +77,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::pair<Value*,int> currValue2DerefCnt;
   bool gepStart;
 
-  // SUSAN: PDT
+  // SUSAN: added analyses
   PostDominatorTree *PDT = nullptr;
   RegionInfo *RI = nullptr;
 

@@ -270,6 +270,10 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
       Type *nextTy = *I;
       if(nextTy == Ty)//recursive case
         Times2Dereference[UO] = 20;
+      else if(PointerType *ptrTy = dyn_cast<PointerType>(nextTy)){
+        if(ptrTy->getPointerElementType() == Ty) // recursive case
+          Times2Dereference[UO] = 20;
+      }
       else if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
         findVariableDepth(nextTy, UO, depths);
     }
@@ -349,7 +353,7 @@ bool CWriter::runOnFunction(Function &F) {
   // SUSAN: add post dominator & region info
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
-  RI->dump();
+  //RI->dump();
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
 
@@ -4858,6 +4862,7 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
       std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
 
+
   visited.insert(fromBB);
   path.insert(fromBB);
 
@@ -4876,6 +4881,7 @@ void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 }
 
 bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
+
   std::set<BasicBlock*> visited;
   std::set<BasicBlock*> path;
   bool foundPathWithoutC = false;
@@ -4897,10 +4903,11 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 
   BasicBlock *exitBB = R->getExit();
 
+  auto times2bePrintedBefore = times2bePrinted;
+
   for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
     BasicBlock *currBB = cast<BasicBlock>(*I);
-
-    if(directPathFromAtoBwithoutC(start,currBB,exitBB)){
+    if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
     }
