@@ -353,7 +353,7 @@ bool CWriter::runOnFunction(Function &F) {
   // SUSAN: add post dominator & region info
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
-  //RI->dump();
+  RI->dump();
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
 
@@ -367,6 +367,7 @@ bool CWriter::runOnFunction(Function &F) {
   std::set<BasicBlock*> visitedBBs;
   markLoopIrregularExits(F); //1
   markIfBranches(F, &visitedBBs); //2
+  markGotoBranches(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F, times2bePrinted); //5
@@ -3751,6 +3752,79 @@ Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst 
   return nullptr;
 }
 
+void CWriter::markGotoBranches(Function &F){
+  for(auto &BB : F){
+    BranchInst *br = dyn_cast<BranchInst>(BB.getTerminator());
+
+    //if it's unconditional, for right now, mark it NOT as goto
+    //need an analysis later to identify unconditional goto statements
+    if(!br || !br->isConditional())
+      continue;
+
+    //if it's in loop header or latch then it's not goto
+    Loop *L = LI->getLoopFor(&BB);
+    if(L && (&BB == L->getHeader() || &BB == L->getLoopLatch()))
+      continue;
+
+    //if it's loop predecessor it's not goto
+    bool isPredecessor = false;
+    for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
+	    BasicBlock *succBB = *succ;
+      Loop *L = LI->getLoopFor(succBB);
+      if(L && &BB == L->getLoopPredecessor()){
+        isPredecessor = true;
+        break;
+      }
+    }
+    if(isPredecessor)
+      continue;
+
+    //if it's a C "if" but with a return statement, it's not captured by region because it's not single exit, but this is not a goto statement either
+    bool isIfReturn = false;
+    for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
+	    BasicBlock *succBB = *succ;
+      if(isa<ReturnInst>(succBB->getTerminator())){
+        isIfReturn = true;
+        break;
+      }
+
+      if(BasicBlock *succsuccBB = succBB->getUniqueSuccessor()){
+        if(isa<ReturnInst>(succsuccBB->getTerminator())){
+          isIfReturn = true;
+          break;
+        }
+      }
+    }
+    if(isIfReturn)
+      continue;
+
+
+
+    //if the branch is not a region entry and not branching to consecutive block, then it's a goto
+    Region *R = RI->getRegionFor(&BB);
+    if(&BB != R->getEntry()){
+      for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
+	      BasicBlock *succBB = *succ;
+        if (std::next(Function::iterator(&BB)) != Function::iterator(succBB)){
+          errs() << "found goto branch:" << *br << "\n";
+          errs() << "from BB " << BB << "\n";
+          gotoBranches.insert(br);
+        }
+      }
+    }
+
+
+    // if we found goto branches, mark its successors as need to print labels
+    for(auto br : gotoBranches){
+      for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
+	      BasicBlock *succBB = *succ;
+        printLabels.insert(succBB);
+      }
+    }
+
+  }
+}
+
 // If branch criterias:
 // 1. conditional branch
 // 2. branch is not from weird loop exits
@@ -4589,7 +4663,7 @@ void CWriter::printLoop(Loop *L) {
       << L->getHeader()->getName() << "' */\n";
 }
 
-void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
+void CWriter::printBasicBlock(BasicBlock *BB) {
   if(times2bePrinted[BB]<=0){
     //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
@@ -4602,14 +4676,8 @@ void CWriter::printBasicBlock(BasicBlock *BB, bool printLabel) {
   // the only terminator use is the predecessor basic block's terminator.
   // We have to scan the use list because PHI nodes use basic blocks too but
   // do not require a label to be generated.
-  bool NeedsLabel = false;
-  for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI)
-    if (isGotoCodeNecessary(*PI, BB)) {
-      NeedsLabel = true;
-      break;
-    }
 
-  if (NeedsLabel && printLabel) {
+  if (printLabels.find(BB) != printLabels.end()) {
     Out << GetValueName(BB) << ":";
     // A label immediately before a late variable declaration is problematic,
     // because "a label can only be part of a statement and a declaration is not
@@ -4817,46 +4885,12 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
 
 void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
                                  unsigned Indent) {
-  if (isGotoCodeNecessary(CurBB, Succ)) {
+  BranchInst *br = dyn_cast<BranchInst>(CurBB->getTerminator());
+  if (gotoBranches.find(br) != gotoBranches.end()) {
     Out << std::string(Indent, ' ') << "  goto ";
     writeOperand(Succ);
     Out << ";\n";
   }
-}
-
-void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
-    std::set<BasicBlock*> visited;
-    std::queue<BasicBlock*> toVisit;
-    visited.insert(start);
-    toVisit.push(start);
-    while(!toVisit.empty()){
-      BasicBlock *currBB = toVisit.front();
-
-      // TODO: need a systematic way to check when does a branch end
-      // currently just adding patches here and there
-      // e.x.,: currBB == otherStart is added from supermutation
-      if(PDT->dominates(currBB, brBlock)){
-        break;
-      }
-
-      if(!times2bePrinted[currBB]){
-        toVisit.pop();
-        continue;
-      }
-
-      printBasicBlock(currBB);
-      times2bePrinted[currBB]--;
-
-      toVisit.pop();
-
-      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-          BasicBlock *succBB = *succ;
-          if(visited.find(succBB)==visited.end()){
-            visited.insert(succBB);
-            toVisit.push(succBB);
-          }
-      }
-    }
 }
 
 void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
@@ -4891,6 +4925,22 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
   directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
   return foundPathWithoutC;
 }
+
+void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
+
+  Region *swRegion = RI->getRegionFor(brBlock);
+  auto times2bePrintedBefore = times2bePrinted;
+  BasicBlock *exitBB = swRegion->getExit();
+  for (Region::block_iterator I = swRegion->block_begin(), E = swRegion->block_end(); I != E; ++I){
+    BasicBlock *currBB = cast<BasicBlock>(*I);
+    if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
+      printBasicBlock(currBB);
+      times2bePrinted[currBB]--;
+    }
+  }
+
+}
+
 
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, Region *R){
     //errs() << "========= Start emitting a branch  ========\n";
@@ -4986,7 +5036,30 @@ BasicBlock* isExitingFunction(BasicBlock* bb){
 void CWriter::visitBranchInst(BranchInst &I) {
   CurInstr = &I;
 
+  //special case: print goto branch
+  if(gotoBranches.find(&I) != gotoBranches.end()){
+    if (I.isConditional()) {
+      Out << "  if (";
+      writeOperand(I.getCondition(), ContextCasted);
+      Out << ") {\n";
 
+      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
+      printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
+
+      Out << "  } else {\n";
+      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+      printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+
+      Out << "  }\n";
+    } else {
+      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+      printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
+    }
+    Out << "\n";
+    return;
+  }
+
+  Region *brRegion = RI->getRegionFor(I.getParent());
 
   if(!I.isConditional()){
     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
@@ -5083,7 +5156,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
   }
 
 
-  Region *brRegion = RI->getRegionFor(I.getParent());
 
     //Case 2: only print if body
     if(trueBrOnly){

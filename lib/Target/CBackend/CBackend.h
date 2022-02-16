@@ -75,6 +75,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<GetElementPtrInst*> NoneArrayGEPs;
   std::map<Value*, int> Times2Dereference;
   std::pair<Value*,int> currValue2DerefCnt;
+  std::set<BasicBlock*> printLabels;
+  std::set<BranchInst*> gotoBranches;
   bool gepStart;
 
   // SUSAN: added analyses
@@ -277,6 +279,7 @@ private:
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
+  void markGotoBranches(Function &F);
   void printCmpOperator(ICmpInst *icmp);
   void printInstruction(Instruction *I);
   void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
@@ -318,7 +321,7 @@ private:
   void printFloatingPointConstants(const Constant *C);
 
   void printFunction(Function &);
-  void printBasicBlock(BasicBlock *BB, bool printLabel = true);
+  void printBasicBlock(BasicBlock *BB);
   void printLoop(Loop *L);
   void printLoopNew(Loop *L);
 
