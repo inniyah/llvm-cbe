@@ -4759,6 +4759,25 @@ void CWriter::visitReturnInst(ReturnInst &I) {
   Out << ";\n";
 }
 
+// an 'if' or 'switch' returns only if the branch's returning or its successor has return statement
+BasicBlock* isExitingFunction(BasicBlock* bb){
+  Instruction *term = bb->getTerminator();
+  if(isa<ReturnInst>(term))
+    return bb;
+
+  if(term->getNumSuccessors() > 1)
+    return nullptr;
+
+  if(isa<UnreachableInst>(term))
+    return bb;
+
+  BasicBlock *succ = term->getSuccessor(0);
+  Instruction *ret = succ->getTerminator();
+
+  if(isa<ReturnInst>(ret)) return succ;
+  else return nullptr;
+}
+
 void CWriter::visitSwitchInst(SwitchInst &SI) {
   CurInstr = &SI;
   BasicBlock *switchBB = SI.getParent();
@@ -4775,23 +4794,37 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
   } else if (NumBits <= 64) { // model as a switch statement
     Out << "  switch (";
     writeOperand(Cond);
-    Out << ") {\n  default:\n";
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
-    emitSwitchBlock(SI.getDefaultDest(), switchBB);
-    Out << "    break;\n";
+    //Out << ") {\n  default:\n";
+    Out << ") {\n";
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //emitSwitchBlock(SI.getDefaultDest(), switchBB);
+    //Out << "    break;\n";
 
-    // Skip the first item since that's the default case.
-    for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e;
-         ++i) {
+    std::map<BasicBlock*, std::set<ConstantInt*>> groupSameCases;
+    for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e; ++i){
       ConstantInt *CaseVal = i->getCaseValue();
       BasicBlock *Succ = i->getCaseSuccessor();
-      Out << "  case ";
-      writeOperand(CaseVal);
-      Out << ":\n";
-      printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
-      emitSwitchBlock(Succ, switchBB);
-      Out << "    break;\n";
+      if(groupSameCases.find(Succ) == groupSameCases.end())
+        groupSameCases[Succ] = { CaseVal };
+      else
+        groupSameCases[Succ].insert(CaseVal);
     }
+
+    for(auto [caseBB, caseVals] : groupSameCases){
+      for(auto caseVal :caseVals){
+        Out << "  case ";
+        writeOperand(caseVal);
+        Out << ":\n";
+      }
+      emitSwitchBlock(caseBB, switchBB);
+
+      //if succBB is exiting function, then don't print break but print return
+      if(BasicBlock *ret = isExitingFunction(caseBB))
+        printInstruction(ret->getTerminator());
+      else
+        Out << "    break;\n";
+    }
+
     Out << "  }\n";
 
   } else { // model as a series of if statements
@@ -5060,24 +5093,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     //errs() << "========= End emitting a branch  ========\n";
 }
 
-// an 'if' returns only if the branch's returning or its successor has return statement
-BasicBlock* isExitingFunction(BasicBlock* bb){
-  Instruction *term = bb->getTerminator();
-  if(isa<ReturnInst>(term))
-    return bb;
 
-  if(term->getNumSuccessors() > 1)
-    return nullptr;
-
-  if(isa<UnreachableInst>(term))
-    return bb;
-
-  BasicBlock *succ = term->getSuccessor(0);
-  Instruction *ret = succ->getTerminator();
-
-  if(isa<ReturnInst>(ret)) return succ;
-  else return nullptr;
-}
 
 
 
