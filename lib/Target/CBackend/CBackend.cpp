@@ -2867,6 +2867,21 @@ void CWriter::generateHeader(Module &M) {
         }
       }
 
+      if(ConstantArray *initArr = dyn_cast<ConstantArray>(initializer)){
+        for (Value *Element : initArr->operands()) {
+          if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(Element) ){
+            Value *v = initializerOp->getPointerOperand();
+            if(GlobalVariable *globElement = dyn_cast<GlobalVariable>(v)){
+              if(declared.find(globElement) == declared.end()){
+                workingList.push(currGlob);
+                isReady2Declare = false;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       if(isReady2Declare){
           declareOneGlobalVariable(currGlob);
           declared.insert(currGlob);
@@ -4929,16 +4944,54 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 
   Region *swRegion = RI->getRegionFor(brBlock);
-  auto times2bePrintedBefore = times2bePrinted;
-  BasicBlock *exitBB = swRegion->getExit();
-  for (Region::block_iterator I = swRegion->block_begin(), E = swRegion->block_end(); I != E; ++I){
-    BasicBlock *currBB = cast<BasicBlock>(*I);
-    if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
-      printBasicBlock(currBB);
-      times2bePrinted[currBB]--;
+
+  //if switch statement is captured by region, translate it using regioninfo
+  if(swRegion->getEntry() == brBlock){
+
+    auto times2bePrintedBefore = times2bePrinted;
+    BasicBlock *exitBB = swRegion->getExit();
+    for (Region::block_iterator I = swRegion->block_begin(), E = swRegion->block_end(); I != E; ++I){
+      BasicBlock *currBB = cast<BasicBlock>(*I);
+      if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
+        printBasicBlock(currBB);
+        times2bePrinted[currBB]--;
+      }
     }
   }
+  else{
+    std::set<BasicBlock*> visited;
+    std::queue<BasicBlock*> toVisit;
+    visited.insert(start);
+    toVisit.push(start);
+    while(!toVisit.empty()){
+      BasicBlock *currBB = toVisit.front();
 
+      // TODO: need a systematic way to check when does a branch end
+      // currently just adding patches here and there
+      // e.x.,: currBB == otherStart is added from supermutation
+      if(PDT->dominates(currBB, brBlock)){
+        break;
+      }
+
+      if(!times2bePrinted[currBB]){
+        toVisit.pop();
+        continue;
+      }
+
+      printBasicBlock(currBB);
+      times2bePrinted[currBB]--;
+
+      toVisit.pop();
+
+      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+          BasicBlock *succBB = *succ;
+          if(visited.find(succBB)==visited.end()){
+            visited.insert(succBB);
+            toVisit.push(succBB);
+          }
+      }
+    }
+  }
 }
 
 
