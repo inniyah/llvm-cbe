@@ -4825,6 +4825,11 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
         Out << "    break;\n";
     }
 
+    Out << "  default:\n";
+    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    emitSwitchBlock(SI.getDefaultDest(), switchBB);
+    Out << "    break;\n";
+
     Out << "  }\n";
 
   } else { // model as a series of if statements
@@ -5252,9 +5257,19 @@ void CWriter::visitBranchInst(BranchInst &I) {
     else{
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(trueStartBB, brBB, falseStartBB, brRegion);
+      BasicBlock *ret = isExitingFunction(trueStartBB);
+      if(ret && ret != trueStartBB){
+        printPHICopiesForSuccessor(trueStartBB, ret, 2);
+        printBasicBlock(ret);
+      }
       Out << "  } else {\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(falseStartBB, brBB, trueStartBB, brRegion);
+      ret = isExitingFunction(falseStartBB);
+      if(ret && ret != falseStartBB){
+        printPHICopiesForSuccessor(falseStartBB, ret, 2);
+        printBasicBlock(ret);
+      }
     }
 
     Out << "}\n";
