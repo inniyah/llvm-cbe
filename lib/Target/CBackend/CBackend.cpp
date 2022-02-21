@@ -3879,16 +3879,16 @@ void CWriter::markGotoBranches(Function &F){
 void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
   for(auto &BB : F){
     //for splitted nodes
-    if(visitedBBs->find(&BB) != visitedBBs->end())
-      continue;
-    visitedBBs->insert(&BB);
+    //if(visitedBBs->find(&BB) != visitedBBs->end())
+    //  continue;
+    //visitedBBs->insert(&BB);
 
     Instruction *term = BB.getTerminator();
     BranchInst *br = dyn_cast<BranchInst>(term);
     if(br && br->isConditional()){
       Loop *L = LI->getLoopFor(&BB);
-      bool negateCondition = false;
-      if(L && L->getHeader() == &BB && headerIsExiting(L, negateCondition))
+      //bool negateCondition = false;
+      if(L && L->getHeader() == &BB)// && headerIsExiting(L, negateCondition))
         continue;
       ifBranches.insert(br);
     }
@@ -5141,7 +5141,16 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
+
   CurInstr = &I;
+
+  //print a loop if the branch corresponds to a loop
+  Loop *L = LI->getLoopFor(I.getParent());
+  if(L && L->getHeader() == I.getParent()){
+    printLoopNew(L);
+    return;
+  }
+
 
   //special case: print goto branch
   if(gotoBranches.find(&I) != gotoBranches.end()){
@@ -5166,6 +5175,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
     return;
   }
 
+  errs() << "SUSAN: branch is a if-else!\n";
   Region *brRegion = RI->getRegionFor(I.getParent());
 
   if(!I.isConditional()){
