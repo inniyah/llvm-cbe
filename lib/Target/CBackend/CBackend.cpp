@@ -4546,7 +4546,6 @@ void CWriter::printFunction(Function &F) {
     } else {
       printBasicBlock(&*BB);
       times2bePrinted[&*BB]--;
-      //printedBBs.insert(&*BB);
     }
   }
 
@@ -5082,6 +5081,14 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
   for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
     BasicBlock *currBB = cast<BasicBlock>(*I);
     if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
+
+      //print a loop if the branch corresponds to a loop
+      Loop *L = LI->getLoopFor(currBB);
+      if(L && L->getHeader() == currBB){
+        printLoopNew(L);
+        continue;
+      }
+
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
     }
@@ -5141,19 +5148,14 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
-
+  errs() << "SUSAN: branch inst: " << I << "\n";
   CurInstr = &I;
 
-  //print a loop if the branch corresponds to a loop
-  Loop *L = LI->getLoopFor(I.getParent());
-  if(L && L->getHeader() == I.getParent()){
-    printLoopNew(L);
-    return;
-  }
 
 
   //special case: print goto branch
   if(gotoBranches.find(&I) != gotoBranches.end()){
+    errs() << "SUSAN: branch is a goto!\n";
     if (I.isConditional()) {
       Out << "  if (";
       writeOperand(I.getCondition(), ContextCasted);
