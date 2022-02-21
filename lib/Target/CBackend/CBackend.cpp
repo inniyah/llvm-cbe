@@ -3767,6 +3767,36 @@ Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst 
   return nullptr;
 }
 
+
+bool isPureBranchBB (BasicBlock *BB){
+  Instruction *term = BB->getTerminator();
+  std::queue<Instruction*> toVisit;
+  toVisit.push(term);
+
+  std::set<Instruction*> BrRelated;
+  while(!toVisit.empty()){
+    Instruction *currInst = toVisit.front();
+    BrRelated.insert(currInst);
+    toVisit.pop();
+
+    for(Use &U : currInst->operands()){
+      if(Instruction *inst = dyn_cast<Instruction>(U.get())){
+        if(inst->getParent() == BB){
+          toVisit.push(inst);
+        }
+      }
+    }
+  }
+
+  for(auto &inst : *BB){
+    if(BrRelated.find(&inst) == BrRelated.end())
+      return false;
+  }
+
+  return true;
+
+}
+
 void CWriter::markGotoBranches(Function &F){
   for(auto &BB : F){
     BranchInst *br = dyn_cast<BranchInst>(BB.getTerminator());
@@ -3821,9 +3851,12 @@ void CWriter::markGotoBranches(Function &F){
       for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
 	      BasicBlock *succBB = *succ;
         if (std::next(Function::iterator(&BB)) != Function::iterator(succBB)){
-          errs() << "found goto branch:" << *br << "\n";
-          errs() << "from BB " << BB << "\n";
-          gotoBranches.insert(br);
+          //excepion: if all instructions within this bb do is to calculate for the branch, then it can still be translated as an if else block
+          if(!isPureBranchBB(&BB)){
+            errs() << "found goto branch:" << *br << "\n";
+            errs() << "from BB " << BB << "\n";
+            gotoBranches.insert(br);
+          }
         }
       }
     }
