@@ -220,6 +220,8 @@ void markBBwithNumOfVisits(Function &F, std::map<BasicBlock*, int> &times2bePrin
     }
     std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
     times2bePrinted[&BB] = preds.size();
+    errs() << "SUSAN:: BB " << BB << "\n";
+    errs() << "ToBePrinted size: " << times2bePrinted[&BB] << "\n";
   }
 }
 
@@ -4546,6 +4548,7 @@ void CWriter::printFunction(Function &F) {
     } else {
       printBasicBlock(&*BB);
       times2bePrinted[&*BB]--;
+      errs() << "SUSAN: decrease times2bePrinted at 4551 for block: " << *BB << "\n";
     }
   }
 
@@ -4667,15 +4670,22 @@ void CWriter::printLoopNew(Loop *L) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
 
+    errs() << "SUSANL BB at 4670: " << *BB << "\n";
     // Don't print Loop header any more
     if(BB != L->getHeader ()){
       if (BBLoop == L){
+        errs() << "SUSAN: belongs to this loop\n";
+        if(!times2bePrinted[BB])
+          errs() << "SUSAN: no times!!!\n";
         printBasicBlock(BB);
         times2bePrinted[BB]--;
+        errs() << "SUSAN: decrease times2bePrinted at 4682 for block: " << *BB << "\n";
         //printedBBs.insert(BB);
       }
-      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
+      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+        errs() << "SUSAN: belongs to nested loop\n";
         printLoopNew(BBLoop);
+      }
     }
   }
 
@@ -4701,6 +4711,7 @@ void CWriter::printLoop(Loop *L) {
     if (BBLoop == L){
       printBasicBlock(BB);
       times2bePrinted[BB]--;
+      errs() << "SUSAN: decrease times2bePrinted at 4714 for block: " << *BB << "\n";
       //printedBBs.insert(BB);
     }
     else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
@@ -4711,8 +4722,9 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB) {
+  errs() << "try to print BB: " << *BB << "\n";
   if(times2bePrinted[BB]<=0){
-    //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
+    errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
   }
   //if(printedBBs.find(BB) != printedBBs.end()){
@@ -5025,6 +5037,7 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
       if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
         printBasicBlock(currBB);
         times2bePrinted[currBB]--;
+        errs() << "SUSAN: decrease times2bePrinted at 5040 for block: " << *currBB << "\n";
       }
     }
   }
@@ -5050,6 +5063,7 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
+      errs() << "SUSAN: decrease times2bePrinted at 5065 for block: " << *currBB << "\n";
 
       toVisit.pop();
 
@@ -5080,6 +5094,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 
   for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
     BasicBlock *currBB = cast<BasicBlock>(*I);
+    errs() << "SUSAN: current BB: " << *currBB << "\n";
     if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
 
       //print a loop if the branch corresponds to a loop
@@ -5091,6 +5106,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
+      errs() << "SUSAN: decrease times2bePrinted at 5108 for block: " << *currBB << "\n";
     }
   }
 
@@ -5249,7 +5265,8 @@ void CWriter::visitBranchInst(BranchInst &I) {
             printInstruction(II);
           }
         }
-        times2bePrinted[exitBB]--;
+        //times2bePrinted[exitBB]--;
+        errs() << "SUSAN: decrease times2bePrinted at 5269 for block: " << *exitBB << "\n";
         //printedBBs.insert(exitBB);
 
         // if exitBB is returning, then don't print break, directly print ret instruction
