@@ -4670,20 +4670,14 @@ void CWriter::printLoopNew(Loop *L) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
 
-    errs() << "SUSANL BB at 4670: " << *BB << "\n";
     // Don't print Loop header any more
-    if(BB != L->getHeader ()){
+    if(BB != L->getHeader()){
       if (BBLoop == L){
-        errs() << "SUSAN: belongs to this loop\n";
-        if(!times2bePrinted[BB])
-          errs() << "SUSAN: no times!!!\n";
+
         printBasicBlock(BB);
         times2bePrinted[BB]--;
-        errs() << "SUSAN: decrease times2bePrinted at 4682 for block: " << *BB << "\n";
-        //printedBBs.insert(BB);
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
-        errs() << "SUSAN: belongs to nested loop\n";
         printLoopNew(BBLoop);
       }
     }
@@ -5094,7 +5088,6 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 
   for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
     BasicBlock *currBB = cast<BasicBlock>(*I);
-    errs() << "SUSAN: current BB: " << *currBB << "\n";
     if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
 
       //print a loop if the branch corresponds to a loop
@@ -5106,7 +5099,6 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
-      errs() << "SUSAN: decrease times2bePrinted at 5108 for block: " << *currBB << "\n";
     }
   }
 
@@ -5164,14 +5156,12 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
 // Branch instruction printing - Avoid printing out a branch to a basic block
 // that immediately succeeds the current one.
 void CWriter::visitBranchInst(BranchInst &I) {
-  errs() << "SUSAN: branch inst: " << I << "\n";
   CurInstr = &I;
 
 
 
   //special case: print goto branch
   if(gotoBranches.find(&I) != gotoBranches.end()){
-    errs() << "SUSAN: branch is a goto!\n";
     if (I.isConditional()) {
       Out << "  if (";
       writeOperand(I.getCondition(), ContextCasted);
@@ -5193,7 +5183,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
     return;
   }
 
-  errs() << "SUSAN: branch is a if-else!\n";
   Region *brRegion = RI->getRegionFor(I.getParent());
 
   if(!I.isConditional()){
@@ -5257,6 +5246,9 @@ void CWriter::visitBranchInst(BranchInst &I) {
   if(exitLoopFalseBB || exitLoopTrueBB){
         //print exitBB
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
+        for (auto succBB = succ_begin(exitBB); succBB != succ_end(exitBB); ++succBB){
+          printPHICopiesForSuccessor(exitBB, *succBB, 2);
+        }
         for (BasicBlock::iterator I = exitBB->begin();
             cast<Instruction>(I) != exitBB->getTerminator();
             ++I){
@@ -5266,7 +5258,6 @@ void CWriter::visitBranchInst(BranchInst &I) {
           }
         }
         //times2bePrinted[exitBB]--;
-        errs() << "SUSAN: decrease times2bePrinted at 5269 for block: " << *exitBB << "\n";
         //printedBBs.insert(exitBB);
 
         // if exitBB is returning, then don't print break, directly print ret instruction
