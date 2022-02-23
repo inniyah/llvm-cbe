@@ -227,7 +227,7 @@ void CWriter::markBBwithNumOfVisits(Function &F){
 
     for(pred_iterator i=pred_begin(&BB), e=pred_end(&BB); i!=e; ++i){
       BasicBlock *predBB = *i;
-      if(PDT->dominates(&BB, predBB))
+      if(!predBB->getUniqueSuccessor() && PDT->dominates(&BB, predBB))
         times2bePrinted[&BB]--;
     }
 
