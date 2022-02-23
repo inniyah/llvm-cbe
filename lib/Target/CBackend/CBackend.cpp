@@ -212,7 +212,7 @@ bool CWriter::isInlineAsm(Instruction &I) const {
     return false;
 }
 
-void markBBwithNumOfVisits(Function &F, std::map<BasicBlock*, int> &times2bePrinted){
+void CWriter::markBBwithNumOfVisits(Function &F){
   for(auto &BB : F){
     if(&BB == &(F.getEntryBlock())){
       times2bePrinted[&BB] = 1;
@@ -220,8 +220,16 @@ void markBBwithNumOfVisits(Function &F, std::map<BasicBlock*, int> &times2bePrin
     }
     std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
     times2bePrinted[&BB] = preds.size();
-    errs() << "SUSAN:: BB " << BB << "\n";
-    errs() << "ToBePrinted size: " << times2bePrinted[&BB] << "\n";
+
+    for(pred_iterator i=pred_begin(&BB), e=pred_end(&BB); i!=e; ++i){
+      BasicBlock *predBB = *i;
+      if(PDT->dominates(&BB, predBB))
+        times2bePrinted[&BB]--;
+    }
+
+    if(times2bePrinted[&BB] < 1)
+      times2bePrinted[&BB] = 1;
+
   }
 }
 
@@ -372,7 +380,7 @@ bool CWriter::runOnFunction(Function &F) {
   markGotoBranches(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
-  markBBwithNumOfVisits(F, times2bePrinted); //5
+  markBBwithNumOfVisits(F); //5
   collectNoneArrayGEPs(F);
   collectVariables2Deref(F);
 

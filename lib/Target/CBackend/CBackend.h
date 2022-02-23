@@ -289,6 +289,7 @@ private:
   void collectVariables2Deref(Function &F);
   Value* findUnderlyingObject(Value *Ptr);
   void findVariableDepth(Type *Ty, Value *UO, int depths);
+  void markBBwithNumOfVisits(Function &F);
 
 
   void writeOperandDeref(Value *Operand);
