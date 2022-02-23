@@ -77,6 +77,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::pair<Value*,int> currValue2DerefCnt;
   std::set<BasicBlock*> printLabels;
   std::set<BranchInst*> gotoBranches;
+  std::set<CallInst*> loopCondCalls;
   bool gepStart;
 
   // SUSAN: added analyses
@@ -290,6 +291,7 @@ private:
   Value* findUnderlyingObject(Value *Ptr);
   void findVariableDepth(Type *Ty, Value *UO, int depths);
   void markBBwithNumOfVisits(Function &F);
+  Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr);
 
 
   void writeOperandDeref(Value *Operand);

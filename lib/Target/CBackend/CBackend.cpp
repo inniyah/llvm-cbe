@@ -171,6 +171,10 @@ bool CWriter::isInlinableInst(Instruction &I) const {
   if (isa<CmpInst>(I) || isa<GetElementPtrInst>(I))
     return true;
 
+  //exit condition can be inlined
+  if(isa<CallInst>(I) && loopCondCalls.find(dyn_cast<CallInst>(&I)) != loopCondCalls.end())
+    return true;
+
   // Must be an expression, must be used exactly once.  If it is dead, we
   // emit it inline where it would go.
   if (isEmptyType(I.getType()) || !I.hasOneUse() || I.isTerminator() ||
@@ -3748,7 +3752,7 @@ void CWriter::markLoopIrregularExits(Function &F){
 
 }
 
-Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr){
+Instruction* CWriter::headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst){
   if(!brInst){
     BasicBlock *header = L->getHeader();
     Instruction* term = header->getTerminator();
@@ -3763,11 +3767,15 @@ Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst 
     if(exit == L->getHeader()){
       Value *opnd0 = brInst->getOperand(0);
       Value *opnd1 = brInst->getOperand(1);
-      if(isa<CmpInst>(opnd0) || isa<UnaryInstruction>(opnd0) || isa<BinaryOperator>(opnd0)){
+      if(isa<CmpInst>(opnd0) || isa<UnaryInstruction>(opnd0) || isa<BinaryOperator>(opnd0) || isa<CallInst>(opnd0)){
+        if(isa<CallInst>(opnd0))
+          loopCondCalls.insert(dyn_cast<CallInst>(opnd0));
         negateCondition = false;
         return cast<Instruction>(opnd0);
       }
-      else if(isa<CmpInst>(opnd1) || isa<UnaryInstruction>(opnd1) || isa<BinaryOperator>(opnd1)){
+      else if(isa<CmpInst>(opnd1) || isa<UnaryInstruction>(opnd1) || isa<BinaryOperator>(opnd1) || isa<CallInst>(opnd1)){
+        if(isa<CallInst>(opnd1))
+          loopCondCalls.insert(dyn_cast<CallInst>(opnd1));
         negateCondition = true;
         return cast<Instruction>(opnd1);
       }
@@ -4551,6 +4559,7 @@ void CWriter::printFunction(Function &F) {
     if (Loop *L = LI->getLoopFor(&*BB)) {
       if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
         //printLoop(L);
+        errs() << "SUSAN: printing loop at 4554\n";
         printLoopNew(L);
       }
     } else {
@@ -4617,6 +4626,7 @@ void CWriter::printLoopNew(Loop *L) {
   std::vector<Instruction*> exitConditionUpdates;
 
   BasicBlock *header = L->getHeader();
+  errs() << "SUSAN: header: " << *header << "\n";
   Instruction* term = header->getTerminator();
   BranchInst* brInst = dyn_cast<BranchInst>(term);
 
@@ -4625,6 +4635,7 @@ void CWriter::printLoopNew(Loop *L) {
   Instruction *condInst = headerIsExiting(L, negateCondition, brInst);
   // print compare statement
   if(condInst){
+    errs() << "SUSAN: condInst: " << *condInst << "\n";
   //  assert(brInst && brInst->isConditional() &&
   //    "exit condition is not a conditional branch inst?");
     //search for exit loop condition
@@ -4652,6 +4663,10 @@ void CWriter::printLoopNew(Loop *L) {
         if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
           printInstruction(cast<Instruction>(I));
 
+    if(isa<CallInst>(condInst)){
+      printInstruction(condInst);
+    }
+
     if(!negateCondition) Out << "while (";
     else Out << "while(!(";
     //writeOperandWithCast(icmp->getOperand(0), *icmp);
@@ -4668,6 +4683,7 @@ void CWriter::printLoopNew(Loop *L) {
     else Out << ")){\n}";
   }
   else{
+    errs() << "SUSAN: no condinst, printing while(1)\n";
     Out << "while(1){\n";
     printPHICopiesForAllPhis(header, 0);
     printBasicBlock(header);
@@ -4686,6 +4702,7 @@ void CWriter::printLoopNew(Loop *L) {
         times2bePrinted[BB]--;
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+        errs() << "SUSAN: printing loop at 4691\n";
         printLoopNew(BBLoop);
       }
     }
@@ -5090,6 +5107,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     //visited.insert(start);
     //toVisit.push(start);
 
+  errs() << "branch is " << *brBlock << "\n";
   BasicBlock *exitBB = R->getExit();
 
   auto times2bePrintedBefore = times2bePrinted;
@@ -5101,6 +5119,7 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
       //print a loop if the branch corresponds to a loop
       Loop *L = LI->getLoopFor(currBB);
       if(L && L->getHeader() == currBB){
+        errs() << "SUSAN: printing loop at 5107\n";
         printLoopNew(L);
         continue;
       }
