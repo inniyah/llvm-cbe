@@ -225,10 +225,19 @@ void CWriter::markBBwithNumOfVisits(Function &F){
     std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
     times2bePrinted[&BB] = preds.size();
 
+    std::set<BasicBlock*>seenPredBBs;
     for(pred_iterator i=pred_begin(&BB), e=pred_end(&BB); i!=e; ++i){
       BasicBlock *predBB = *i;
-      if(!predBB->getUniqueSuccessor() && PDT->dominates(&BB, predBB))
+      if(seenPredBBs.find(predBB) != seenPredBBs.end()){
         times2bePrinted[&BB]--;
+        continue;
+      }
+      seenPredBBs.insert(predBB);
+
+      if(!predBB->getUniqueSuccessor()
+          && PDT->dominates(&BB, predBB)){
+        times2bePrinted[&BB]--;
+      }
     }
 
     if(times2bePrinted[&BB] < 1)
@@ -5089,74 +5098,53 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
     //errs() << "========= Start emitting a branch  ========\n";
     //errs() << *start << "\n";
     //errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
-    //std::set<BasicBlock*> visited;
-    //std::queue<BasicBlock*> toVisit;
-    //visited.insert(start);
-    //toVisit.push(start);
 
-  errs() << "branch is " << *brBlock << "\n";
-  BasicBlock *exitBB = R->getExit();
 
-  auto times2bePrintedBefore = times2bePrinted;
+      std::set<BasicBlock*> visited;
+      std::queue<BasicBlock*> toVisit;
+      visited.insert(start);
+      toVisit.push(start);
+      while(!toVisit.empty()){
+        BasicBlock *currBB = toVisit.front();
 
-  for (Region::block_iterator I = R->block_begin(), E = R->block_end(); I != E; ++I){
-    BasicBlock *currBB = cast<BasicBlock>(*I);
-    if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
+        // TODO: need a systematic way to check when does a branch end
+        // currently just adding patches here and there
+        // e.x.,: currBB == otherStart is added from supermutation
+        if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
+          break;
+        }
 
-      //print a loop if the branch corresponds to a loop
-      Loop *L = LI->getLoopFor(currBB);
-      if(L && L->getHeader() == currBB){
-        errs() << "SUSAN: printing loop at 5107\n";
-        printLoopNew(L);
-        continue;
+        // splitted blocks, their controled blocks can be printed >1 times
+        bool printLabel = true;
+        if(splittedBBs.find(brBlock) != splittedBBs.end()){
+          //printedBBs.erase(currBB);
+          printLabel = false;
+        }
+
+        if(!times2bePrinted[currBB]){
+          toVisit.pop();
+          continue;
+        }
+        //if(printedBBs.find(currBB) != printedBBs.end()){
+          //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
+          //toVisit.pop();
+          //continue;
+        //}
+
+        printBasicBlock(currBB);
+        times2bePrinted[currBB]--;
+        //printedBBs.insert(currBB);
+
+        toVisit.pop();
+
+        for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+            BasicBlock *succBB = *succ;
+            if(visited.find(succBB)==visited.end()){
+              visited.insert(succBB);
+              toVisit.push(succBB);
+            }
+        }
       }
-
-      printBasicBlock(currBB);
-      times2bePrinted[currBB]--;
-    }
-  }
-
-  //  while(!toVisit.empty()){
-  //    BasicBlock *currBB = toVisit.front();
-
-  //    // TODO: need a systematic way to check when does a branch end
-  //    // currently just adding patches here and there
-  //    // e.x.,: currBB == otherStart is added from supermutation
-  //    if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
-  //      break;
-  //    }
-
-  //    // splitted blocks, their controled blocks can be printed >1 times
-  //    bool printLabel = true;
-  //    if(splittedBBs.find(brBlock) != splittedBBs.end()){
-  //      //printedBBs.erase(currBB);
-  //      printLabel = false;
-  //    }
-
-  //    if(!times2bePrinted[currBB]){
-  //      toVisit.pop();
-  //      continue;
-  //    }
-  //    //if(printedBBs.find(currBB) != printedBBs.end()){
-  //      //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
-  //      //toVisit.pop();
-  //      //continue;
-  //    //}
-
-  //    printBasicBlock(currBB, printLabel);
-  //    times2bePrinted[currBB]--;
-  //    //printedBBs.insert(currBB);
-
-  //    toVisit.pop();
-
-  //    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-  //        BasicBlock *succBB = *succ;
-  //        if(visited.find(succBB)==visited.end()){
-  //          visited.insert(succBB);
-  //          toVisit.push(succBB);
-  //        }
-  //    }
-  //  }
     //errs() << "========= End emitting a branch  ========\n";
 }
 
