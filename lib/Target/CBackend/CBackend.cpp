@@ -373,8 +373,9 @@ bool CWriter::runOnFunction(Function &F) {
     return false;
 
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  // SUSAN: add post dominator & region info
+  // SUSAN: add post dominator, dominator & region info
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
   RI->dump();
   // Get rid of intrinsics we can't handle.

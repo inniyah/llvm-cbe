@@ -42,6 +42,7 @@
 
 // SUSAN ADDED LIBS
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/RegionInfo.h"
 
 namespace llvm_cbe {
@@ -82,6 +83,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
   // SUSAN: added analyses
   PostDominatorTree *PDT = nullptr;
+  DominatorTree *DT = nullptr;
   RegionInfo *RI = nullptr;
 
   std::string _Out;
