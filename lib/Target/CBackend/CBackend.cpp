@@ -3815,6 +3815,25 @@ bool isPureBranchBB (BasicBlock *BB){
 
 }
 
+// an 'if' or 'switch' returns only if the branch's returning or its successor has return statement
+BasicBlock* isExitingFunction(BasicBlock* bb){
+  Instruction *term = bb->getTerminator();
+  if(isa<ReturnInst>(term))
+    return bb;
+
+  if(term->getNumSuccessors() > 1)
+    return nullptr;
+
+  if(isa<UnreachableInst>(term))
+    return bb;
+
+  BasicBlock *succ = term->getSuccessor(0);
+  Instruction *ret = succ->getTerminator();
+
+  if(isa<ReturnInst>(ret)) return succ;
+  else return nullptr;
+}
+
 void CWriter::markGotoBranches(Function &F){
   for(auto &BB : F){
     BranchInst *br = dyn_cast<BranchInst>(BB.getTerminator());
@@ -3842,22 +3861,8 @@ void CWriter::markGotoBranches(Function &F){
     if(isPredecessor)
       continue;
 
-    //if it's a C "if" but with a return statement, it's not captured by region because it's not single exit, but this is not a goto statement either
-    bool isIfReturn = false;
-    for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
-	    BasicBlock *succBB = *succ;
-      if(isa<ReturnInst>(succBB->getTerminator())){
-        isIfReturn = true;
-        break;
-      }
-
-      if(BasicBlock *succsuccBB = succBB->getUniqueSuccessor()){
-        if(isa<ReturnInst>(succsuccBB->getTerminator())){
-          isIfReturn = true;
-          break;
-        }
-      }
-    }
+    bool isIfReturn = isExitingFunction(br->getSuccessor(0))
+                      || isExitingFunction(br->getSuccessor(1));
     if(isIfReturn)
       continue;
 
@@ -4822,24 +4827,6 @@ void CWriter::visitReturnInst(ReturnInst &I) {
   Out << ";\n";
 }
 
-// an 'if' or 'switch' returns only if the branch's returning or its successor has return statement
-BasicBlock* isExitingFunction(BasicBlock* bb){
-  Instruction *term = bb->getTerminator();
-  if(isa<ReturnInst>(term))
-    return bb;
-
-  if(term->getNumSuccessors() > 1)
-    return nullptr;
-
-  if(isa<UnreachableInst>(term))
-    return bb;
-
-  BasicBlock *succ = term->getSuccessor(0);
-  Instruction *ret = succ->getTerminator();
-
-  if(isa<ReturnInst>(ret)) return succ;
-  else return nullptr;
-}
 
 void CWriter::visitSwitchInst(SwitchInst &SI) {
   CurInstr = &SI;
