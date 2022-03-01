@@ -42,11 +42,20 @@
 
 // SUSAN ADDED LIBS
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/RegionInfo.h"
 
 namespace llvm_cbe {
 
 using namespace llvm;
+
+//SUSAN: added structs
+typedef struct CBERegion{
+  Instruction *br;
+  CBERegion *parentRegion;
+  std::vector<BasicBlock*> BBs;
+  std::vector<struct CBERegion*> subRegions;
+} CBERegion;
 
 class CBEMCAsmInfo : public MCAsmInfo {
 public:
@@ -68,7 +77,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> splittedBBs;
   std::set<Instruction*> declaredInsts;
   std::set<std::pair<BasicBlock*, BasicBlock*>> irregularLoopExits;
-  std::set<BranchInst*> ifBranches;
+  std::vector<Instruction*> ifBranches;
   std::set<Type*> printedTypeNames;
   std::set<GetElementPtrInst*> accessGEPMemory;
   std::set<GetElementPtrInst*> GEPPointers;
@@ -80,8 +89,12 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<CallInst*> loopCondCalls;
   bool gepStart;
 
+
+  CBERegion topRegion;
+
   // SUSAN: added analyses
   PostDominatorTree *PDT = nullptr;
+  DominatorTree *DT = nullptr;
   RegionInfo *RI = nullptr;
 
   std::string _Out;
@@ -207,6 +220,7 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
+    AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<RegionInfoPass>();
     AU.setPreservesCFG();
   }
@@ -292,6 +306,8 @@ private:
   void findVariableDepth(Type *Ty, Value *UO, int depths);
   void markBBwithNumOfVisits(Function &F);
   Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr);
+  void recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, std::map<CBERegion*, Instruction*> &recordedRegionBrs);
+  void CountTimes2bePrintedByRegionPath (std::vector<CBERegion*> regionPath, CBERegion* R);
 
 
   void writeOperandDeref(Value *Operand);

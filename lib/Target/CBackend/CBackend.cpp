@@ -216,33 +216,322 @@ bool CWriter::isInlineAsm(Instruction &I) const {
     return false;
 }
 
+// an 'if' or 'switch' returns only if the branch's returning or its successor has return statement
+BasicBlock* isExitingFunction(BasicBlock* bb){
+  Instruction *term = bb->getTerminator();
+  if(isa<ReturnInst>(term))
+    return bb;
+
+  if(term->getNumSuccessors() > 1)
+    return nullptr;
+
+  if(isa<UnreachableInst>(term))
+    return bb;
+
+  BasicBlock *succ = term->getSuccessor(0);
+  Instruction *ret = succ->getTerminator();
+
+  if(isa<ReturnInst>(ret)) return succ;
+  else return nullptr;
+}
+
+void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
+      std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
+
+
+  visited.insert(fromBB);
+  path.insert(fromBB);
+
+  if(fromBB == toBB){
+    if(path.find(avoidBB) == path.end())
+      foundPathWithoutC = true;
+  }
+  else{
+    for (auto succ = succ_begin(fromBB); succ != succ_end(fromBB); ++succ){
+      BasicBlock *succBB = *succ;
+      if(visited.find(succBB) == visited.end())
+        directPathFromAtoBwithoutC(succBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+    }
+  }
+  visited.erase(fromBB);
+}
+
+bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
+
+  std::set<BasicBlock*> visited;
+  std::set<BasicBlock*> path;
+  bool foundPathWithoutC = false;
+
+  //if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
+
+  directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
+  return foundPathWithoutC;
+}
+
+bool isSubsetOf(CBERegion *candidateSubRegion, CBERegion *currNode){
+  bool subsetOfcurrNode  = true;
+  for(BasicBlock *bb : candidateSubRegion->BBs)
+    if(!std::count(currNode->BBs.begin(), currNode->BBs.end(), bb)){
+      subsetOfcurrNode = false;
+      break;
+  }
+  return subsetOfcurrNode;
+}
+
+std::set<CBERegion*> RegionsOfBranch (Instruction* brUT,
+    std::map<CBERegion*, Instruction*> recordedRegionBrs){
+  std::set<CBERegion*> regions;
+  for(auto &[region, br] : recordedRegionBrs){
+    if(br == brUT)
+      regions.insert(region);
+  }
+  return regions;
+}
+
+void DeleteRepetitiveBBs(CBERegion* region){
+  std::stack<CBERegion*> toVisit;
+
+  toVisit.push(region);
+
+  while(!toVisit.empty()){
+    CBERegion *currRegion = toVisit.top();
+    toVisit.pop();
+
+      CBERegion* parentRegion = currRegion->parentRegion;
+      while(parentRegion){
+        for(auto bb : currRegion->BBs){
+          auto it = std::find(parentRegion->BBs.begin(),
+              parentRegion->BBs.end(), bb);
+          if(it != parentRegion->BBs.end())
+            parentRegion->BBs.erase(it);
+        }
+        parentRegion = parentRegion->parentRegion;
+      }
+
+    for(auto subRegion : currRegion->subRegions){
+      toVisit.push(subRegion);
+    }
+  }
+
+}
+
 void CWriter::markBBwithNumOfVisits(Function &F){
+  topRegion.br = nullptr;
+  topRegion.parentRegion = nullptr;
+  std::vector<CBERegion*> regionNodes;
   for(auto &BB : F){
-    if(&BB == &(F.getEntryBlock())){
-      times2bePrinted[&BB] = 1;
-      continue;
-    }
-    std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
-    times2bePrinted[&BB] = preds.size();
+    topRegion.BBs.push_back(&BB);
+    times2bePrinted[&BB]=0;
+  }
 
-    std::set<BasicBlock*>seenPredBBs;
-    for(pred_iterator i=pred_begin(&BB), e=pred_end(&BB); i!=e; ++i){
-      BasicBlock *predBB = *i;
-      if(seenPredBBs.find(predBB) != seenPredBBs.end()){
-        times2bePrinted[&BB]--;
-        continue;
+  regionNodes.push_back(&topRegion);
+
+  std::map<CBERegion*, Instruction*> recordedRegionBrs;
+  // assuming ifs are ordered in the programming order
+  for(auto br : ifBranches){
+    BasicBlock *currBB = br->getParent();
+
+    //analyse the branch properties
+    BasicBlock *exitingBB = currBB;
+    BasicBlock *exitLoopTrueBB = nullptr;
+    BasicBlock *exitLoopFalseBB = nullptr;
+    for(unsigned int i_succ = 0; i_succ<br->getNumSuccessors(); ++i_succ){
+      BasicBlock *exitBB = br->getSuccessor(i_succ);
+      for(auto edge : irregularLoopExits){
+        if(edge.first == exitingBB && edge.second == exitBB){
+          if(i_succ==0) exitLoopTrueBB = exitBB;
+          else if(i_succ==1) exitLoopFalseBB = exitBB;
+        }
       }
-      seenPredBBs.insert(predBB);
+    }
+    BasicBlock *brBB = currBB;
+    BasicBlock *trueStartBB = br->getSuccessor(0);
+    BasicBlock *falseStartBB = br->getSuccessor(1);
+    bool exitFunctionTrueBr = isExitingFunction(trueStartBB);
+    bool exitFunctionFalseBr = isExitingFunction(falseStartBB);
+    bool trueBrOnly = PDT->dominates(falseStartBB, trueStartBB) &&
+                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
+    bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
+                      directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
+    if(!trueBrOnly && !falseBrOnly){
+      trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
+      falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
+    }
+    // end of analysis
 
-      if(!predBB->getUniqueSuccessor()
-          && PDT->dominates(&BB, predBB)){
-        times2bePrinted[&BB]--;
-      }
+
+    bool recordSubBranches = true;
+    std::set<CBERegion*> existingRegions = RegionsOfBranch(br, recordedRegionBrs);
+    if(existingRegions.empty()){
+      CBERegion *newR = new CBERegion();
+      newR->parentRegion = &topRegion;
+      topRegion.subRegions.push_back(newR);
+      //regionNodes.push_back(newR);
+      newR->br = br;
+      recordedRegionBrs[newR] = br;
+      existingRegions.insert(newR);
+      recordSubBranches = true;
     }
 
-    if(times2bePrinted[&BB] < 1)
-      times2bePrinted[&BB] = 1;
 
+    for(auto currRegion : existingRegions){
+       if(exitLoopFalseBB || exitLoopTrueBB){
+           BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
+           currRegion->BBs.push_back(exitBB);
+           // if succBB of exitBB is returning, don't print break, print return block
+           for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
+	           BasicBlock *retBB = *ret;
+             currRegion->BBs.push_back(retBB);
+           }
+           continue;
+       }
+
+       if(trueBrOnly){
+         if(recordSubBranches)
+           recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
+             currRegion, recordedRegionBrs);
+
+         BasicBlock *ret = isExitingFunction(trueStartBB);
+         if(ret && ret != trueStartBB)
+           currRegion->BBs.push_back(ret);
+       }
+       //Case 3: only print if body with reveresed case
+       else if(falseBrOnly){
+         if(recordSubBranches)
+           recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
+               currRegion, recordedRegionBrs);
+
+         BasicBlock *ret = isExitingFunction(falseStartBB);
+         if(ret && ret != falseStartBB)
+           currRegion->BBs.push_back(ret);
+       }
+       //Case 4: print if & else;
+       else{
+         if(recordSubBranches)
+           recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
+               currRegion, recordedRegionBrs);
+
+         BasicBlock *ret = isExitingFunction(trueStartBB);
+         if(ret && ret != trueStartBB)
+           currRegion->BBs.push_back(ret);
+
+         if(recordSubBranches)
+           recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
+               currRegion, recordedRegionBrs);
+
+         ret = isExitingFunction(falseStartBB);
+         if(ret && ret != falseStartBB)
+           currRegion->BBs.push_back(ret);
+      }
+    }
+  }
+
+
+
+  //arrange nodes into a tree
+//  std::queue<CBERegion*> toVisit;
+//  toVisit.push(&topRegion);
+//
+//  while(!toVisit.empty()){
+//    CBERegion *currNode = toVisit.front();
+//    toVisit.pop();
+//
+//    CBERegion *parent = currNode->parentRegion;
+//    if(parent){
+//
+//      //first, move a sibling node to be a child if it's a subset
+//      std::vector<CBERegion*> toBeRemoved;
+//      for(auto siblingRegion : parent->subRegions){
+//        if(siblingRegion == currNode) continue;
+//
+//        if(isSubsetOf(siblingRegion, currNode)){
+//          toBeRemoved.push_back(siblingRegion);
+//          currNode->subRegions.push_back(siblingRegion);
+//          siblingRegion->parentRegion = currNode;
+//        }
+//      }
+//
+//      //delete the sibling node from parent
+//      std::vector<CBERegion*> newSiblings;
+//      for(auto siblingRegion : parent->subRegions){
+//        if(siblingRegion == currNode){
+//          newSiblings.push_back(currNode);
+//          continue;
+//        }
+//
+//        if(!std::count(toBeRemoved.begin(), toBeRemoved.end(), siblingRegion))
+//          newSiblings.push_back(siblingRegion);
+//      }
+//      parent->subRegions = newSiblings;
+//    }
+//
+//    for(CBERegion *subRegion : currNode->subRegions){
+//      toVisit.push(subRegion);
+//    }
+//  }
+
+  //view the tree:
+  std::queue<CBERegion*> toVisit;
+  toVisit.push(&topRegion);
+  while(!toVisit.empty()){
+    CBERegion *currNode = toVisit.front();
+    toVisit.pop();
+    if(currNode->br)
+      errs() << "SUSAN: Node " << *(currNode->br) << "\n";
+    else
+      errs() << "SUSAN: Node: topRegion\n";
+
+    errs() << "SubNodes: \n";
+    for(auto subNode : currNode->subRegions){
+      errs() << *(subNode->br) << "\n";
+    }
+
+    errs() << "current region bbs:\n";
+    for(auto BB : currNode->BBs){
+      errs() << BB->getName() << "\n";
+    }
+
+    for(CBERegion *subRegion : currNode->subRegions){
+      toVisit.push(subRegion);
+    }
+  }
+
+  //despite root node, each leaf-to-child_of_root path will contain a set of BBs, these BBs times2bePrinted need to be incrememnted, lastly any node with times2bePrinted = 0 means it belong to the entry node and therefore times2bePrinted = 1
+  std::vector<CBERegion*> regionPath;
+  DeleteRepetitiveBBs(&topRegion);
+
+  //view the tree:
+  //std::queue<CBERegion*> toVisit;
+  toVisit.push(&topRegion);
+  while(!toVisit.empty()){
+    CBERegion *currNode = toVisit.front();
+    toVisit.pop();
+    if(currNode->br)
+      errs() << "SUSAN: Node " << *(currNode->br) << "\n";
+    else
+      errs() << "SUSAN: Node: topRegion\n";
+
+    errs() << "SubNodes: \n";
+    for(auto subNode : currNode->subRegions){
+      errs() << *(subNode->br) << "\n";
+    }
+
+    errs() << "current region bbs:\n";
+    for(auto BB : currNode->BBs){
+      errs() << BB->getName() << "\n";
+      times2bePrinted[BB]++;
+    }
+
+    for(CBERegion *subRegion : currNode->subRegions){
+      toVisit.push(subRegion);
+    }
+  }
+
+
+
+
+  for(auto &BB : F){
+    errs() << "SUSAN: BB " << BB.getName() << " times2bePrinted: " << times2bePrinted[&BB] << "\n";
   }
 }
 
@@ -375,6 +664,7 @@ bool CWriter::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   // SUSAN: add post dominator & region info
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
   RI->dump();
   // Get rid of intrinsics we can't handle.
@@ -389,8 +679,8 @@ bool CWriter::runOnFunction(Function &F) {
 
   std::set<BasicBlock*> visitedBBs;
   markLoopIrregularExits(F); //1
-  markIfBranches(F, &visitedBBs); //2
   markGotoBranches(F);
+  markIfBranches(F, &visitedBBs); //2
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F); //5
@@ -3794,7 +4084,6 @@ Instruction* CWriter::headerIsExiting(Loop *L, bool &negateCondition, BranchInst
   return nullptr;
 }
 
-
 bool isPureBranchBB (BasicBlock *BB){
   Instruction *term = BB->getTerminator();
   std::queue<Instruction*> toVisit;
@@ -3824,24 +4113,7 @@ bool isPureBranchBB (BasicBlock *BB){
 
 }
 
-// an 'if' or 'switch' returns only if the branch's returning or its successor has return statement
-BasicBlock* isExitingFunction(BasicBlock* bb){
-  Instruction *term = bb->getTerminator();
-  if(isa<ReturnInst>(term))
-    return bb;
 
-  if(term->getNumSuccessors() > 1)
-    return nullptr;
-
-  if(isa<UnreachableInst>(term))
-    return bb;
-
-  BasicBlock *succ = term->getSuccessor(0);
-  Instruction *ret = succ->getTerminator();
-
-  if(isa<ReturnInst>(ret)) return succ;
-  else return nullptr;
-}
 
 void CWriter::markGotoBranches(Function &F){
   for(auto &BB : F){
@@ -3914,15 +4186,16 @@ void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
     //if(visitedBBs->find(&BB) != visitedBBs->end())
     //  continue;
     //visitedBBs->insert(&BB);
-
     Instruction *term = BB.getTerminator();
     BranchInst *br = dyn_cast<BranchInst>(term);
+    if(br && gotoBranches.find(br) != gotoBranches.end()) continue;
+
     if(br && br->isConditional()){
       Loop *L = LI->getLoopFor(&BB);
-      //bool negateCondition = false;
-      if(L && L->getHeader() == &BB)// && headerIsExiting(L, negateCondition))
+      bool negateCondition = false;
+      if(L && L->getHeader() == &BB && headerIsExiting(L, negateCondition))
         continue;
-      ifBranches.insert(br);
+      ifBranches.push_back(br);
     }
   }
 }
@@ -3930,103 +4203,103 @@ void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
 // Split the nodes that have two or more predecessors marked by if statement
 void CWriter::NodeSplitting(Function &F){
 
-  std::map<BasicBlock*, int> numOfMarkedPredecessors;
-
-  for(auto &BB : F){
-    // find the successors of a marked basic block
-    for(auto &inst : BB){
-      if(ifBranches.find(dyn_cast<BranchInst>(&inst)) != ifBranches.end()){
-        for (auto succ = succ_begin(&inst);
-           succ != succ_end(&inst); ++succ){
-          BasicBlock *succBB = *succ;
-          if(numOfMarkedPredecessors.find(succBB) ==
-              numOfMarkedPredecessors.end())
-            numOfMarkedPredecessors[succBB] = 1;
-          else
-            numOfMarkedPredecessors[succBB] ++;
-        }
-        break;
-      }
-    }
-  }
-
-  for(auto const & [BB, numOfPred] : numOfMarkedPredecessors){
-    if(numOfPred > 1){
-      //errs() << "SUSAN: found a node to split:" << *BB << "\n";
-      std::set<BasicBlock*> copysOfBB;
-      std::vector<BasicBlock*> preds;
-
-      // Does node splitting with the following steps:
-      // 1. copy the basic block n-1 times, n is the num of predecessor
-      // 2. for each copied block, update the def use chain
-      // 3. each copy gets one unique predecessor
-      for(pred_iterator i=pred_begin(BB), e=pred_end(BB); i!=e; ++i){
-        preds.push_back(*i);
-      }
-
-
-      ValueToValueMapTy VMap;
-      for(long unsigned int i=1; i<preds.size(); i++){
-        BasicBlock *pred = preds[i];
-        //clone n-1 BBs for splitting
-        BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
-
-        //modify each instruction in copyBB to follow its own def-use chain
-        for(auto &I : *copyBB){
-          for (Use &U : I.operands()){
-            Value *useVal = U.get();
-            if(VMap.find(useVal)!=VMap.end()){
-              U.set(VMap[useVal]);
-            }
-          }
-        }
-
-        F.getBasicBlockList().push_back(copyBB);
-
-        //modify the CFG according to node splitting algorithm
-        Instruction *term = pred->getTerminator();
-        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
-          BasicBlock *succBB = term->getSuccessor(i_succ);
-          if(succBB == BB){
-            term->replaceSuccessorWith(BB, copyBB);
-          }
-        }
-        copysOfBB.insert(copyBB);
-        splittedBBs.insert(copyBB);
-      }
-
-      for(auto &copyBB : copysOfBB){
-        //modify the successor's phi node to include the copied block
-        //errs() << "SUSAN: copyBB is " << *copyBB << "\n";
-        Instruction *term = copyBB->getTerminator();
-        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
-          BasicBlock *succBB = term->getSuccessor(i_succ);
-          for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
-            PHINode *phi = cast<PHINode>(I);
-            //errs() << "SUSAN: PHINode: " << *phi << "\n";
-            Value* originalVal = phi->getIncomingValueForBlock(BB);
-            //errs() << "originalVal:" << *originalVal << "\n";
-            if(isa<Instruction> (originalVal))
-              phi->addIncoming(VMap[originalVal],copyBB);
-            else if(isa<Constant> (originalVal))
-              phi->addIncoming(originalVal, copyBB);
-            else
-              assert(0 && "PHI value is not Constant or Instruction, check!\n");
-          }
-        }
-      }
-      copysOfBB.insert(BB);
-
-      //In the future there might be a need to modify the phi nodes
-      /*for(auto & bbToAdjust : copysOfBB){
-        for (BasicBlock::iterator I = bbToAdjust->begin(); isa<PHINode>(I); ++I) {
-          PHINode *PN = cast<PHINode>(I);
-          errs() << "SUSAN: PHINode: " << *PN << "\n";
-        }
-      }*/
-
-    }
-  }
+//  std::map<BasicBlock*, int> numOfMarkedPredecessors;
+//
+//  for(auto &BB : F){
+//    // find the successors of a marked basic block
+//    for(auto &inst : BB){
+//      if(ifBranches.find(dyn_cast<BranchInst>(&inst)) != ifBranches.end()){
+//        for (auto succ = succ_begin(&inst);
+//           succ != succ_end(&inst); ++succ){
+//          BasicBlock *succBB = *succ;
+//          if(numOfMarkedPredecessors.find(succBB) ==
+//              numOfMarkedPredecessors.end())
+//            numOfMarkedPredecessors[succBB] = 1;
+//          else
+//            numOfMarkedPredecessors[succBB] ++;
+//        }
+//        break;
+//      }
+//    }
+//  }
+//
+//  for(auto const & [BB, numOfPred] : numOfMarkedPredecessors){
+//    if(numOfPred > 1){
+//      //errs() << "SUSAN: found a node to split:" << *BB << "\n";
+//      std::set<BasicBlock*> copysOfBB;
+//      std::vector<BasicBlock*> preds;
+//
+//      // Does node splitting with the following steps:
+//      // 1. copy the basic block n-1 times, n is the num of predecessor
+//      // 2. for each copied block, update the def use chain
+//      // 3. each copy gets one unique predecessor
+//      for(pred_iterator i=pred_begin(BB), e=pred_end(BB); i!=e; ++i){
+//        preds.push_back(*i);
+//      }
+//
+//
+//      ValueToValueMapTy VMap;
+//      for(long unsigned int i=1; i<preds.size(); i++){
+//        BasicBlock *pred = preds[i];
+//        //clone n-1 BBs for splitting
+//        BasicBlock *copyBB = CloneBasicBlock(BB, VMap, Twine(".")+Twine("splitted")+Twine(i));
+//
+//        //modify each instruction in copyBB to follow its own def-use chain
+//        for(auto &I : *copyBB){
+//          for (Use &U : I.operands()){
+//            Value *useVal = U.get();
+//            if(VMap.find(useVal)!=VMap.end()){
+//              U.set(VMap[useVal]);
+//            }
+//          }
+//        }
+//
+//        F.getBasicBlockList().push_back(copyBB);
+//
+//        //modify the CFG according to node splitting algorithm
+//        Instruction *term = pred->getTerminator();
+//        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+//          BasicBlock *succBB = term->getSuccessor(i_succ);
+//          if(succBB == BB){
+//            term->replaceSuccessorWith(BB, copyBB);
+//          }
+//        }
+//        copysOfBB.insert(copyBB);
+//        splittedBBs.insert(copyBB);
+//      }
+//
+//      for(auto &copyBB : copysOfBB){
+//        //modify the successor's phi node to include the copied block
+//        //errs() << "SUSAN: copyBB is " << *copyBB << "\n";
+//        Instruction *term = copyBB->getTerminator();
+//        for(unsigned int i_succ = 0; i_succ<term->getNumSuccessors(); ++i_succ){
+//          BasicBlock *succBB = term->getSuccessor(i_succ);
+//          for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
+//            PHINode *phi = cast<PHINode>(I);
+//            //errs() << "SUSAN: PHINode: " << *phi << "\n";
+//            Value* originalVal = phi->getIncomingValueForBlock(BB);
+//            //errs() << "originalVal:" << *originalVal << "\n";
+//            if(isa<Instruction> (originalVal))
+//              phi->addIncoming(VMap[originalVal],copyBB);
+//            else if(isa<Constant> (originalVal))
+//              phi->addIncoming(originalVal, copyBB);
+//            else
+//              assert(0 && "PHI value is not Constant or Instruction, check!\n");
+//          }
+//        }
+//      }
+//      copysOfBB.insert(BB);
+//
+//      //In the future there might be a need to modify the phi nodes
+//      /*for(auto & bbToAdjust : copysOfBB){
+//        for (BasicBlock::iterator I = bbToAdjust->begin(); isa<PHINode>(I); ++I) {
+//          PHINode *PN = cast<PHINode>(I);
+//          errs() << "SUSAN: PHINode: " << *PN << "\n";
+//        }
+//      }*/
+//
+//    }
+//  }
 }
 
 /// Output all floating point constants that cannot be printed accurately...
@@ -4579,7 +4852,8 @@ void CWriter::printFunction(Function &F) {
     } else {
       printBasicBlock(&*BB);
       times2bePrinted[&*BB]--;
-      errs() << "SUSAN: decrease times2bePrinted at 4551 for block: " << *BB << "\n";
+      if(BB->getName() == "if.then40")
+        errs() << "SUSAN: times2bePrinted for if.then40 at 4855 = " << times2bePrinted[&*BB];
     }
   }
 
@@ -4714,6 +4988,8 @@ void CWriter::printLoopNew(Loop *L) {
 
         printBasicBlock(BB);
         times2bePrinted[BB]--;
+        if(BB->getName() == "if.then40")
+        errs() << "SUSAN: times2bePrinted for if.then40 at 4992 = " << times2bePrinted[&*BB] << "\n";
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
         errs() << "SUSAN: printing loop at 4691\n";
@@ -4744,7 +5020,8 @@ void CWriter::printLoop(Loop *L) {
     if (BBLoop == L){
       printBasicBlock(BB);
       times2bePrinted[BB]--;
-      errs() << "SUSAN: decrease times2bePrinted at 4714 for block: " << *BB << "\n";
+      if(BB->getName() == "if.then40")
+        errs() << "SUSAN: times2bePrinted for if.then40 at 5023 = " << times2bePrinted[&*BB];
       //printedBBs.insert(BB);
     }
     else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
@@ -4755,7 +5032,6 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB) {
-  errs() << "try to print BB: " << *BB << "\n";
   if(times2bePrinted[BB]<=0){
     errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
@@ -5005,38 +5281,6 @@ void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
   }
 }
 
-void directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB,
-      std::set<BasicBlock*> &visited, std::set<BasicBlock*> &path, bool &foundPathWithoutC){
-
-
-  visited.insert(fromBB);
-  path.insert(fromBB);
-
-  if(fromBB == toBB){
-    if(path.find(avoidBB) == path.end())
-      foundPathWithoutC = true;
-  }
-  else{
-    for (auto succ = succ_begin(fromBB); succ != succ_end(fromBB); ++succ){
-      BasicBlock *succBB = *succ;
-      if(visited.find(succBB) == visited.end())
-        directPathFromAtoBwithoutC(succBB, toBB, avoidBB, visited, path, foundPathWithoutC);
-    }
-  }
-  visited.erase(fromBB);
-}
-
-bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock *avoidBB){
-
-  std::set<BasicBlock*> visited;
-  std::set<BasicBlock*> path;
-  bool foundPathWithoutC = false;
-
-  //if(!isPotentiallyReachable(fromBB, avoidBB)) return true;
-
-  directPathFromAtoBwithoutC(fromBB, toBB, avoidBB, visited, path, foundPathWithoutC);
-  return foundPathWithoutC;
-}
 
 void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 
@@ -5052,7 +5296,6 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
       if(directPathFromAtoBwithoutC(start,currBB,exitBB) && times2bePrinted[currBB] == times2bePrintedBefore[currBB]){
         printBasicBlock(currBB);
         times2bePrinted[currBB]--;
-        errs() << "SUSAN: decrease times2bePrinted at 5040 for block: " << *currBB << "\n";
       }
     }
   }
@@ -5078,7 +5321,6 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 
       printBasicBlock(currBB);
       times2bePrinted[currBB]--;
-      errs() << "SUSAN: decrease times2bePrinted at 5065 for block: " << *currBB << "\n";
 
       toVisit.pop();
 
@@ -5094,12 +5336,43 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 }
 
 
+void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, std::map<CBERegion*, Instruction*> &recordedRegionBrs){
+      std::set<BasicBlock*> visited;
+      std::queue<BasicBlock*> toVisit;
+      visited.insert(start);
+      toVisit.push(start);
+
+      while(!toVisit.empty()){
+        BasicBlock *currBB = toVisit.front();
+
+        if(PDT->dominates(currBB, brBlock) || currBB == otherStart){
+          break;
+        }
+
+        //create a new region
+        Instruction *br = currBB->getTerminator();
+        if(std::count(ifBranches.begin(), ifBranches.end(), br)){
+          CBERegion *newR = new CBERegion();
+          newR->parentRegion = R;
+          R->subRegions.push_back(newR);
+          newR->br = br;
+          recordedRegionBrs[newR] = br;
+        }
+
+        R->BBs.push_back(currBB);
+        toVisit.pop();
+
+        for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+            BasicBlock *succBB = *succ;
+            if(visited.find(succBB)==visited.end()){
+              visited.insert(succBB);
+              toVisit.push(succBB);
+            }
+        }
+      }
+}
+
 void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, Region *R){
-    //errs() << "========= Start emitting a branch  ========\n";
-    //errs() << *start << "\n";
-    //errs() << "SUSAN: beginning of emitIfBlock, what's the brBlock?" << *brBlock << "\n";
-
-
       std::set<BasicBlock*> visited;
       std::queue<BasicBlock*> toVisit;
       visited.insert(start);
@@ -5114,26 +5387,17 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
           break;
         }
 
-        // splitted blocks, their controled blocks can be printed >1 times
-        bool printLabel = true;
-        if(splittedBBs.find(brBlock) != splittedBBs.end()){
-          //printedBBs.erase(currBB);
-          printLabel = false;
+        if(currBB->getName() == "if.then40"){
+          errs() << "SUSAN: times2bePrinted for if.then40 at 5390 = " << times2bePrinted[currBB] << "\n";
+          errs() << "branch: " << *brBlock << "\n";
         }
-
         if(!times2bePrinted[currBB]){
           toVisit.pop();
           continue;
         }
-        //if(printedBBs.find(currBB) != printedBBs.end()){
-          //errs() << "SUSAN: BB already printed, shouldn't visit again" << *currBB << "\n";
-          //toVisit.pop();
-          //continue;
-        //}
 
         printBasicBlock(currBB);
         times2bePrinted[currBB]--;
-        //printedBBs.insert(currBB);
 
         toVisit.pop();
 
@@ -5145,7 +5409,6 @@ void CWriter::emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *ot
             }
         }
       }
-    //errs() << "========= End emitting a branch  ========\n";
 }
 
 
