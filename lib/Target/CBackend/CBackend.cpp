@@ -268,13 +268,13 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
   return foundPathWithoutC;
 }
 
-std::set<CBERegion*> CWriter::RegionsOfBranch (Instruction* brUT){
+bool CWriter::alreadyVisitedBranch (Instruction* brUT){
   std::set<CBERegion*> regions;
   for(auto &[region, br] : recordedRegionBrs){
     if(br == brUT)
-      regions.insert(region);
+      return true;
   }
-  return regions;
+  return false;
 }
 
 void CWriter::CountTimes2bePrintedByRegionPath(){
@@ -286,7 +286,7 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
     CBERegion *currRegion = toVisit.top();
     toVisit.pop();
 
-    if(currRegion->subRegions.empty()){
+    if(currRegion->thenSubRegions.empty() && currRegion->elseSubRegions.empty()){
       errs() << "currRegion: " << *currRegion->br << "\n";
     //  CBERegion* parent = currRegion->parentRegion;
     //  std::set<BasicBlock*> blocks2cnt;
@@ -313,24 +313,30 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
         times2bePrinted[bb]++;
     }
 
-    for(auto subRegion : currRegion->subRegions){
+    for(auto subRegion : currRegion->thenSubRegions){
+      toVisit.push(subRegion);
+    }
+    for(auto subRegion : currRegion->elseSubRegions){
       toVisit.push(subRegion);
     }
   }
 
 }
 
-CBERegion* CWriter::createNewRegion(Instruction* br, CBERegion* parentR){
+CBERegion* CWriter::createNewRegion(Instruction* br, CBERegion* parentR, bool isElseRegion){
    //create a new region
    CBERegion *newR = new CBERegion();
    newR->parentRegion = parentR;
-   parentR->subRegions.push_back(newR);
+   if(isElseRegion)
+    parentR->elseSubRegions.push_back(newR);
+   else
+     parentR->thenSubRegions.push_back(newR);
    newR->br = br;
    recordedRegionBrs[newR] = br;
    return newR;
 }
 
-void CWriter::markBranch(Instruction* br, std::set<CBERegion*> targetRegions){
+void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
     BasicBlock *currBB = br->getParent();
 
     //analyse the branch properties
@@ -364,52 +370,51 @@ void CWriter::markBranch(Instruction* br, std::set<CBERegion*> targetRegions){
 
 
 
-    for(auto currRegion : targetRegions){
-       if(exitLoopFalseBB || exitLoopTrueBB){
-           BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
-           currRegion->thenBBs.push_back(exitBB);
-           // if succBB of exitBB is returning, don't print break, print return block
-           for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
-	           BasicBlock *retBB = *ret;
-             currRegion->thenBBs.push_back(retBB);
-           }
-           continue;
-       }
-
-       if(trueBrOnly){
-           recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
-             currRegion);
-
-         BasicBlock *ret = isExitingFunction(trueStartBB);
-         if(ret && ret != trueStartBB)
-           currRegion->thenBBs.push_back(ret);
-       }
-       //Case 3: only print if body with reveresed case
-       else if(falseBrOnly){
-         recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
-               currRegion);
-
-         BasicBlock *ret = isExitingFunction(falseStartBB);
-         if(ret && ret != falseStartBB)
-           currRegion->thenBBs.push_back(ret);
-       }
-       //Case 4: print if & else;
-       else{
-         recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
-               currRegion);
-
-         BasicBlock *ret = isExitingFunction(trueStartBB);
-         if(ret && ret != trueStartBB)
-           currRegion->thenBBs.push_back(ret);
-
-         recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
-               currRegion, true);
-
-         ret = isExitingFunction(falseStartBB);
-         if(ret && ret != falseStartBB)
-           currRegion->elseBBs.push_back(ret);
-      }
+    CBERegion *currRegion = targetRegion;
+    if(exitLoopFalseBB || exitLoopTrueBB){
+        BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
+        currRegion->thenBBs.push_back(exitBB);
+        // if succBB of exitBB is returning, don't print break, print return block
+        for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
+	        BasicBlock *retBB = *ret;
+          currRegion->thenBBs.push_back(retBB);
+        }
+        return;
     }
+
+    if(trueBrOnly){
+        recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
+          currRegion);
+
+      BasicBlock *ret = isExitingFunction(trueStartBB);
+      if(ret && ret != trueStartBB)
+        currRegion->thenBBs.push_back(ret);
+    }
+    //Case 3: only print if body with reveresed case
+    else if(falseBrOnly){
+      recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
+            currRegion);
+
+      BasicBlock *ret = isExitingFunction(falseStartBB);
+      if(ret && ret != falseStartBB)
+        currRegion->thenBBs.push_back(ret);
+    }
+    //Case 4: print if & else;
+    else{
+      recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
+            currRegion);
+
+      BasicBlock *ret = isExitingFunction(trueStartBB);
+      if(ret && ret != trueStartBB)
+        currRegion->thenBBs.push_back(ret);
+
+      recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
+            currRegion, true);
+
+      ret = isExitingFunction(falseStartBB);
+      if(ret && ret != falseStartBB)
+        currRegion->elseBBs.push_back(ret);
+   }
 }
 
 void CWriter::markBBwithNumOfVisits(Function &F){
@@ -427,14 +432,13 @@ void CWriter::markBBwithNumOfVisits(Function &F){
   for(auto br : ifBranches){
 
     //create a new region if not created
-    std::set<CBERegion*> existingRegions = RegionsOfBranch(br);
-    if(existingRegions.empty()){
-      CBERegion *newR = createNewRegion(br, &topRegion);
-      existingRegions.insert(newR);
-      topRegion.thenBBs.push_back(br->getParent());
-    }
+    if(alreadyVisitedBranch(br))
+      continue;
 
-    markBranch(br, existingRegions);
+    CBERegion *newR = createNewRegion(br, &topRegion, false);
+    topRegion.thenBBs.push_back(br->getParent());
+
+    markBranchRegion(br, newR);
   }
 
   //despite root node, each leaf-to-child_of_root path will contain a set of BBs, these BBs times2bePrinted need to be incrememnted, lastly any node with times2bePrinted = 0 means it belong to the entry node and therefore times2bePrinted = 1
@@ -454,8 +458,13 @@ void CWriter::markBBwithNumOfVisits(Function &F){
     else
       errs() << "SUSAN: Node: topRegion\n";
 
-    errs() << "SubNodes: \n";
-    for(auto subNode : currNode->subRegions){
+    errs() << "then SubNodes: \n";
+    for(auto subNode : currNode->thenSubRegions){
+      errs() << *(subNode->br) << "\n";
+    }
+
+    errs() << "else SubNodes: \n";
+    for(auto subNode : currNode->elseSubRegions){
       errs() << *(subNode->br) << "\n";
     }
 
@@ -470,7 +479,10 @@ void CWriter::markBBwithNumOfVisits(Function &F){
     }
 
     CBERegionMap[currNode->br] = currNode;
-    for(CBERegion *subRegion : currNode->subRegions){
+    for(CBERegion *subRegion : currNode->thenSubRegions){
+      toVisit.push(subRegion);
+    }
+    for(CBERegion *subRegion : currNode->elseSubRegions){
       toVisit.push(subRegion);
     }
   }
@@ -5285,9 +5297,15 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
   }
 }
 
-bool CWriter::belongsToSubRegions(BasicBlock *bb, CBERegion *R){
+bool CWriter::belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch){
   std::queue<CBERegion*> toVisit;
-  toVisit.push(R);
+  if(isElseBranch)
+    for(auto subR : R->elseSubRegions)
+      toVisit.push(subR);
+  else
+    for(auto subR : R->thenSubRegions)
+      toVisit.push(subR);
+
 
   while(!toVisit.empty()){
     CBERegion *currNode = toVisit.front();
@@ -5299,7 +5317,10 @@ bool CWriter::belongsToSubRegions(BasicBlock *bb, CBERegion *R){
       return true;
 
     CBERegionMap[currNode->br] = currNode;
-    for(CBERegion *subRegion : currNode->subRegions){
+    for(CBERegion *subRegion : currNode->thenSubRegions){
+      toVisit.push(subRegion);
+    }
+    for(CBERegion *subRegion : currNode->elseSubRegions){
       toVisit.push(subRegion);
     }
   }
@@ -5321,13 +5342,12 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
           break;
         }
 
-        if(!belongsToSubRegions(currBB, R)){
+        if(!belongsToSubRegions(currBB, R, isElseBranch)){
 
           Instruction *br = currBB->getTerminator();
           if(std::count(ifBranches.begin(), ifBranches.end(), br)){
-            CBERegion *newR = createNewRegion(br,R);
-            std::set<CBERegion*> existingRegions({newR});
-            markBranch(br, existingRegions);
+            CBERegion *newR = createNewRegion(br,R, isElseBranch);
+            markBranchRegion(br, newR);
           }
 
           if(isElseBranch) R->elseBBs.push_back(currBB);

@@ -53,8 +53,10 @@ using namespace llvm;
 typedef struct CBERegion{
   Instruction *br;
   CBERegion *parentRegion;
-  std::vector<BasicBlock*> BBs;
-  std::vector<struct CBERegion*> subRegions;
+  std::vector<BasicBlock*> thenBBs;
+  std::vector<BasicBlock*> elseBBs;
+  std::vector<struct CBERegion*> thenSubRegions;
+  std::vector<struct CBERegion*> elseSubRegions;
 } CBERegion;
 
 class CBEMCAsmInfo : public MCAsmInfo {
@@ -87,6 +89,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> printLabels;
   std::set<BranchInst*> gotoBranches;
   std::set<CallInst*> loopCondCalls;
+  std::map<Instruction*, CBERegion*> CBERegionMap;
+  std::map<CBERegion*, Instruction*> recordedRegionBrs;
   bool gepStart;
 
 
@@ -290,7 +294,7 @@ private:
   };
 
   // SUSAN: added functions
-  void emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherBlock, Region *R);
+  void emitIfBlock(CBERegion *R, bool isElseBranch=false);
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
@@ -306,8 +310,12 @@ private:
   void findVariableDepth(Type *Ty, Value *UO, int depths);
   void markBBwithNumOfVisits(Function &F);
   Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr);
-  void recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, std::map<CBERegion*, Instruction*> &recordedRegionBrs);
-  void CountTimes2bePrintedByRegionPath (std::vector<CBERegion*> regionPath, CBERegion* R);
+  void recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, bool isElseBranch = false);
+  void CountTimes2bePrintedByRegionPath ();
+  void markBranchRegion(Instruction* br, CBERegion* targetRegion);
+  bool alreadyVisitedBranch (Instruction* brUT);
+  bool belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch);
+  CBERegion* createNewRegion(Instruction* br, CBERegion* parentR, bool isElseRegion);
 
 
   void writeOperandDeref(Value *Operand);
