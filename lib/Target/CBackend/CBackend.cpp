@@ -286,8 +286,8 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
     CBERegion *currRegion = toVisit.top();
     toVisit.pop();
 
-    if(currRegion->thenSubRegions.empty() && currRegion->elseSubRegions.empty()){
-      errs() << "currRegion: " << *currRegion->br << "\n";
+    //if(currRegion->thenSubRegions.empty() && currRegion->elseSubRegions.empty()){
+    //  errs() << "currRegion: " << *currRegion->br << "\n";
     //  CBERegion* parent = currRegion->parentRegion;
     //  std::set<BasicBlock*> blocks2cnt;
     //  while(parent){
@@ -307,18 +307,19 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
     //    parent = parent->parentRegion;
     //  }
 
-      for(auto bb : currRegion->thenBBs)
-        times2bePrinted[bb]++;
-      for(auto bb : currRegion->elseBBs)
-        times2bePrinted[bb]++;
-    }
 
-    for(auto subRegion : currRegion->thenSubRegions){
+    //}
+
+    for(auto bb : currRegion->thenBBs)
+      times2bePrinted[bb]++;
+    for(auto bb : currRegion->elseBBs)
+      times2bePrinted[bb]++;
+
+    for(auto subRegion : currRegion->thenSubRegions)
       toVisit.push(subRegion);
-    }
-    for(auto subRegion : currRegion->elseSubRegions){
+    for(auto subRegion : currRegion->elseSubRegions)
       toVisit.push(subRegion);
-    }
+
   }
 
 }
@@ -5366,9 +5367,12 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
       }
 }
 
-void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
+void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
+      if(isa<ReturnInst>(bb->getTerminator())){
+        printPHICopiesForSuccessor(phiBB, bb, 2);
+      }
       printBasicBlock(bb);
       times2bePrinted[bb]--;
     }
@@ -5485,8 +5489,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
             printInstruction(II);
           }
         }
-        //times2bePrinted[exitBB]--;
-        //printedBBs.insert(exitBB);
+        times2bePrinted[exitBB]--;
 
         // if exitBB is returning, then don't print break, directly print ret instruction
         if(isa<ReturnInst>(exitBB->getTerminator())){
@@ -5501,6 +5504,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
           if(isa<ReturnInst>(retBB->getTerminator())){
             printPHICopiesForSuccessor(exitBB, retBB, 2);
             printBasicBlock(retBB);
+            times2bePrinted[retBB]--;
             Out << "    }\n";
             return;
           }
@@ -5515,42 +5519,20 @@ void CWriter::visitBranchInst(BranchInst &I) {
     //Case 2: only print if body
     if(trueBrOnly){
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(cbeRegion);
-
-      BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != trueStartBB){
-        printPHICopiesForSuccessor(trueStartBB, ret, 2);
-        printBasicBlock(ret);
-      }
+      emitIfBlock(cbeRegion, trueStartBB);
     }
     //Case 3: only print if body with reveresed case
     else if(falseBrOnly){
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(cbeRegion);
-
-      BasicBlock *ret = isExitingFunction(falseStartBB);
-      if(ret && ret != falseStartBB){
-        printPHICopiesForSuccessor(falseStartBB, ret, 2);
-        printBasicBlock(ret);
-      }
+      emitIfBlock(cbeRegion, falseStartBB);
     }
     //Case 4: print if & else;
     else{
       printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(cbeRegion);
-      BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != trueStartBB){
-        printPHICopiesForSuccessor(trueStartBB, ret, 2);
-        printBasicBlock(ret);
-      }
+      emitIfBlock(cbeRegion, trueStartBB);
       Out << "  } else {\n";
       printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(cbeRegion, true);
-      ret = isExitingFunction(falseStartBB);
-      if(ret && ret != falseStartBB){
-        printPHICopiesForSuccessor(falseStartBB, ret, 2);
-        printBasicBlock(ret);
-      }
+      emitIfBlock(cbeRegion, falseStartBB, true);
     }
 
     Out << "}\n";

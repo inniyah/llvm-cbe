@@ -294,7 +294,7 @@ private:
   };
 
   // SUSAN: added functions
-  void emitIfBlock(CBERegion *R, bool isElseBranch=false);
+  void emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch=false);
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
