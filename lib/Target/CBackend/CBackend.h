@@ -49,6 +49,16 @@ namespace llvm_cbe {
 
 using namespace llvm;
 
+//SUSAN: added structs
+typedef struct CBERegion{
+  Instruction *br;
+  CBERegion *parentRegion;
+  std::vector<BasicBlock*> thenBBs;
+  std::vector<BasicBlock*> elseBBs;
+  std::vector<struct CBERegion*> thenSubRegions;
+  std::vector<struct CBERegion*> elseSubRegions;
+} CBERegion;
+
 class CBEMCAsmInfo : public MCAsmInfo {
 public:
   CBEMCAsmInfo() { PrivateGlobalPrefix = ""; }
@@ -69,7 +79,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> splittedBBs;
   std::set<Instruction*> declaredInsts;
   std::set<std::pair<BasicBlock*, BasicBlock*>> irregularLoopExits;
-  std::set<BranchInst*> ifBranches;
+  std::vector<Instruction*> ifBranches;
   std::set<Type*> printedTypeNames;
   std::set<GetElementPtrInst*> accessGEPMemory;
   std::set<GetElementPtrInst*> GEPPointers;
@@ -79,7 +89,12 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> printLabels;
   std::set<BranchInst*> gotoBranches;
   std::set<CallInst*> loopCondCalls;
+  std::map<Instruction*, CBERegion*> CBERegionMap;
+  std::map<CBERegion*, Instruction*> recordedRegionBrs;
   bool gepStart;
+
+
+  CBERegion topRegion;
 
   // SUSAN: added analyses
   PostDominatorTree *PDT = nullptr;
@@ -209,6 +224,7 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
+    AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<RegionInfoPass>();
     AU.setPreservesCFG();
   }
@@ -278,7 +294,7 @@ private:
   };
 
   // SUSAN: added functions
-  void emitIfBlock(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherBlock, Region *R);
+  void emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch=false);
   void markLoopIrregularExits(Function &F);
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
@@ -294,6 +310,12 @@ private:
   void findVariableDepth(Type *Ty, Value *UO, int depths);
   void markBBwithNumOfVisits(Function &F);
   Instruction* headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst = nullptr);
+  void recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, bool isElseBranch = false);
+  void CountTimes2bePrintedByRegionPath ();
+  void markBranchRegion(Instruction* br, CBERegion* targetRegion);
+  bool alreadyVisitedBranch (Instruction* brUT);
+  bool belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch);
+  CBERegion* createNewRegion(Instruction* br, CBERegion* parentR, bool isElseRegion);
 
 
   void writeOperandDeref(Value *Operand);
