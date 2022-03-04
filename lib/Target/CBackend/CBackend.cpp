@@ -442,25 +442,6 @@ void CWriter::fillOutTopRegion(Function &F){
     }
 
   }
-
-
-  //currently a patch because loop is not part of a region:
-  for(auto BB : topRegion.thenBBs){
-    Loop *L = LI->getLoopFor(BB);
-    if(L && L->getHeader() == BB){
-      bool negateCondition = false;
-      Instruction* term = BB->getTerminator();
-      BranchInst* brInst = dyn_cast<BranchInst>(term);
-      Instruction *isExiting = headerIsExiting(L, negateCondition, brInst);
-      if(isExiting){
-        for (auto succIt = succ_begin(L->getHeader()); succIt != succ_end(L->getHeader()); ++succIt){
-	        BasicBlock *succBB = *succIt;
-          if(BasicBlock* exitBB = isExitingFunction(succBB))
-            topRegion.thenBBs.push_back(exitBB);
-        }
-      }
-    }
-  }
 }
 
 void CWriter::markBBwithNumOfVisits(Function &F){
@@ -544,6 +525,10 @@ void CWriter::markBBwithNumOfVisits(Function &F){
     //  std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
     //  times2bePrinted[&BB] = preds.size() ? preds.size() : 1;
     //}
+    if(isa<ReturnInst>(BB.getTerminator())){
+      std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
+      times2bePrinted[&BB] = preds.size() ? preds.size() : 1;
+    }
     errs() << "SUSAN: BB " << BB.getName() << " times2bePrinted: " << times2bePrinted[&BB] << "\n";
   }
 }
