@@ -316,6 +316,7 @@ private:
   bool alreadyVisitedRegion (BasicBlock* bbUT);
   bool belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch);
   CBERegion* createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion);
+  void fillOutTopRegion(Function &F);
 
 
   void writeOperandDeref(Value *Operand);

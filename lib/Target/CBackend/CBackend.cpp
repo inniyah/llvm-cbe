@@ -418,6 +418,51 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
    }
 }
 
+void CWriter::fillOutTopRegion(Function &F){
+  BasicBlock* entryBB = &F.getEntryBlock();
+  std::queue<BasicBlock*> toVisit;
+  std::set<BasicBlock*> visited;
+  toVisit.push(entryBB);
+  visited.insert(entryBB);
+
+  while(!toVisit.empty()){
+    BasicBlock* currBB = toVisit.front();
+    errs() << "SUSAN: visiting block " << currBB->getName() << "\n";
+    toVisit.pop();
+    if(!belongsToSubRegions(currBB, &topRegion, false)){
+      errs() << "adding BB to top because it doesn't belong to subregions" << currBB->getName() << "\n";
+      topRegion.thenBBs.push_back(currBB);
+    }
+    for (auto it = succ_begin(currBB); it != succ_end(currBB); ++it){
+	    BasicBlock *succBB = *it;
+		  if(visited.find(succBB)==visited.end()){
+        toVisit.push(succBB);
+        visited.insert(succBB);
+      }
+    }
+
+  }
+
+
+  //currently a patch because loop is not part of a region:
+  for(auto BB : topRegion.thenBBs){
+    Loop *L = LI->getLoopFor(BB);
+    if(L && L->getHeader() == BB){
+      bool negateCondition = false;
+      Instruction* term = BB->getTerminator();
+      BranchInst* brInst = dyn_cast<BranchInst>(term);
+      Instruction *isExiting = headerIsExiting(L, negateCondition, brInst);
+      if(isExiting){
+        for (auto succIt = succ_begin(L->getHeader()); succIt != succ_end(L->getHeader()); ++succIt){
+	        BasicBlock *succBB = *succIt;
+          if(BasicBlock* exitBB = isExitingFunction(succBB))
+            topRegion.thenBBs.push_back(exitBB);
+        }
+      }
+    }
+  }
+}
+
 void CWriter::markBBwithNumOfVisits(Function &F){
 
   //set up top region
@@ -437,10 +482,15 @@ void CWriter::markBBwithNumOfVisits(Function &F){
       continue;
 
     CBERegion *newR = createNewRegion(br->getParent(), &topRegion, false);
-    topRegion.thenBBs.push_back(br->getParent());
+    //topRegion.thenBBs.push_back(br->getParent());
 
     markBranchRegion(br, newR);
   }
+
+
+
+  fillOutTopRegion(F);
+
 
   //despite root node, each leaf-to-child_of_root path will contain a set of BBs, these BBs times2bePrinted need to be incrememnted, lastly any node with times2bePrinted = 0 means it belong to the entry node and therefore times2bePrinted = 1
   std::vector<CBERegion*> regionPath;
@@ -490,10 +540,10 @@ void CWriter::markBBwithNumOfVisits(Function &F){
 
 
   for(auto &BB : F){
-    if(!times2bePrinted[&BB]){
-      std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
-      times2bePrinted[&BB] = preds.size() ? preds.size() : 1;
-    }
+    //if(!times2bePrinted[&BB]){
+    //  std::vector<BasicBlock*> preds(pred_begin(&BB), pred_end(&BB));
+    //  times2bePrinted[&BB] = preds.size() ? preds.size() : 1;
+    //}
     errs() << "SUSAN: BB " << BB.getName() << " times2bePrinted: " << times2bePrinted[&BB] << "\n";
   }
 }
