@@ -268,10 +268,10 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
   return foundPathWithoutC;
 }
 
-bool CWriter::alreadyVisitedBranch (Instruction* brUT){
+bool CWriter::alreadyVisitedRegion (BasicBlock* bbUT){
   std::set<CBERegion*> regions;
-  for(auto &[region, br] : recordedRegionBrs){
-    if(br == brUT)
+  for(auto &[region, bb] : recordedRegionBBs){
+    if(bb == bbUT)
       return true;
   }
   return false;
@@ -324,7 +324,7 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
 
 }
 
-CBERegion* CWriter::createNewRegion(Instruction* br, CBERegion* parentR, bool isElseRegion){
+CBERegion* CWriter::createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion){
    //create a new region
    CBERegion *newR = new CBERegion();
    newR->parentRegion = parentR;
@@ -332,8 +332,8 @@ CBERegion* CWriter::createNewRegion(Instruction* br, CBERegion* parentR, bool is
     parentR->elseSubRegions.push_back(newR);
    else
      parentR->thenSubRegions.push_back(newR);
-   newR->br = br;
-   recordedRegionBrs[newR] = br;
+   newR->entryBlock = entryBB;
+   recordedRegionBBs[newR] = entryBB;
    return newR;
 }
 
@@ -421,7 +421,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
 void CWriter::markBBwithNumOfVisits(Function &F){
 
   //set up top region
-  topRegion.br = nullptr;
+  topRegion.entryBlock = nullptr;
   topRegion.parentRegion = nullptr;
   for(auto &BB : F){
    // topRegion.thenBBs.push_back(&BB);
@@ -433,10 +433,10 @@ void CWriter::markBBwithNumOfVisits(Function &F){
   for(auto br : ifBranches){
 
     //create a new region if not created
-    if(alreadyVisitedBranch(br))
+    if(alreadyVisitedRegion(br->getParent()))
       continue;
 
-    CBERegion *newR = createNewRegion(br, &topRegion, false);
+    CBERegion *newR = createNewRegion(br->getParent(), &topRegion, false);
     topRegion.thenBBs.push_back(br->getParent());
 
     markBranchRegion(br, newR);
@@ -454,19 +454,19 @@ void CWriter::markBBwithNumOfVisits(Function &F){
   while(!toVisit.empty()){
     CBERegion *currNode = toVisit.front();
     toVisit.pop();
-    if(currNode->br)
-      errs() << "SUSAN: Node " << *(currNode->br) << "\n";
+    if(currNode->entryBlock)
+      errs() << "SUSAN: Node " << (currNode->entryBlock->getName()) << "\n";
     else
       errs() << "SUSAN: Node: topRegion\n";
 
     errs() << "then SubNodes: \n";
     for(auto subNode : currNode->thenSubRegions){
-      errs() << *(subNode->br) << "\n";
+      errs() << (subNode->entryBlock->getName()) << "\n";
     }
 
     errs() << "else SubNodes: \n";
     for(auto subNode : currNode->elseSubRegions){
-      errs() << *(subNode->br) << "\n";
+      errs() << (subNode->entryBlock->getName()) << "\n";
     }
 
     errs() << "current region then bbs:\n";
@@ -479,7 +479,7 @@ void CWriter::markBBwithNumOfVisits(Function &F){
       errs() << BB->getName() << "\n";
     }
 
-    CBERegionMap[currNode->br] = currNode;
+    CBERegionMap[currNode->entryBlock] = currNode;
     for(CBERegion *subRegion : currNode->thenSubRegions){
       toVisit.push(subRegion);
     }
@@ -5317,7 +5317,7 @@ bool CWriter::belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranc
     if(std::count(currNode->elseBBs.begin(), currNode->elseBBs.end(), bb))
       return true;
 
-    CBERegionMap[currNode->br] = currNode;
+    CBERegionMap[currNode->entryBlock] = currNode;
     for(CBERegion *subRegion : currNode->thenSubRegions){
       toVisit.push(subRegion);
     }
@@ -5347,7 +5347,7 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 
           Instruction *br = currBB->getTerminator();
           if(std::count(ifBranches.begin(), ifBranches.end(), br)){
-            CBERegion *newR = createNewRegion(br,R, isElseBranch);
+            CBERegion *newR = createNewRegion(currBB, R, isElseBranch);
             markBranchRegion(br, newR);
           }
 
@@ -5421,7 +5421,7 @@ void CWriter::visitBranchInst(BranchInst &I) {
     return;
   }
 
-  CBERegion *cbeRegion = CBERegionMap[&I];
+  CBERegion *cbeRegion = CBERegionMap[I.getParent()];
 
   BasicBlock *exitingBB = I.getParent();
   BasicBlock *exitLoopTrueBB = nullptr;

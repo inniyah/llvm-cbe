@@ -51,7 +51,7 @@ using namespace llvm;
 
 //SUSAN: added structs
 typedef struct CBERegion{
-  Instruction *br;
+  BasicBlock *entryBlock; //entryBlock itself should belong to parent region
   CBERegion *parentRegion;
   std::vector<BasicBlock*> thenBBs;
   std::vector<BasicBlock*> elseBBs;
@@ -89,8 +89,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<BasicBlock*> printLabels;
   std::set<BranchInst*> gotoBranches;
   std::set<CallInst*> loopCondCalls;
-  std::map<Instruction*, CBERegion*> CBERegionMap;
-  std::map<CBERegion*, Instruction*> recordedRegionBrs;
+  std::map<BasicBlock*, CBERegion*> CBERegionMap;
+  std::map<CBERegion*, BasicBlock*> recordedRegionBBs;
   bool gepStart;
 
 
@@ -313,9 +313,9 @@ private:
   void recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBlock, BasicBlock *otherStart, CBERegion *R, bool isElseBranch = false);
   void CountTimes2bePrintedByRegionPath ();
   void markBranchRegion(Instruction* br, CBERegion* targetRegion);
-  bool alreadyVisitedBranch (Instruction* brUT);
+  bool alreadyVisitedRegion (BasicBlock* bbUT);
   bool belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch);
-  CBERegion* createNewRegion(Instruction* br, CBERegion* parentR, bool isElseRegion);
+  CBERegion* createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion);
 
 
   void writeOperandDeref(Value *Operand);
