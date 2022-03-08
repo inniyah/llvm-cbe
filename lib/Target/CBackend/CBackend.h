@@ -57,6 +57,8 @@ typedef struct CBERegion{
   std::vector<BasicBlock*> elseBBs;
   std::vector<struct CBERegion*> thenSubRegions;
   std::vector<struct CBERegion*> elseSubRegions;
+  std::vector<std::pair<BasicBlock*, BasicBlock*>> thenEdges;
+  std::vector<std::pair<BasicBlock*, BasicBlock*>> elseEdges;
 } CBERegion;
 
 class CBEMCAsmInfo : public MCAsmInfo {
@@ -314,9 +316,10 @@ private:
   void CountTimes2bePrintedByRegionPath ();
   void markBranchRegion(Instruction* br, CBERegion* targetRegion);
   bool alreadyVisitedRegion (BasicBlock* bbUT);
-  bool belongsToSubRegions(BasicBlock *bb, CBERegion *R, bool isElseBranch);
+  bool belongsToSubRegions(BasicBlock *fromBB, BasicBlock *toBB, CBERegion *R, bool isElseBranch);
   CBERegion* createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion);
-  void fillOutTopRegion(Function &F);
+  void createSubRegionOrRecordCurrentRegion(BasicBlock* predBB, BasicBlock* currBB, CBERegion *R, bool isElseBranch);
+  BasicBlock* findFirstBrBlock(BasicBlock* entryBlock);
 
 
   void writeOperandDeref(Value *Operand);
