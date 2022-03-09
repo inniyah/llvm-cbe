@@ -317,11 +317,12 @@ private:
   void CountTimes2bePrintedByRegionPath ();
   void markBranchRegion(Instruction* br, CBERegion* targetRegion);
   bool alreadyVisitedRegion (BasicBlock* bbUT);
-  bool belongsToSubRegions(BasicBlock *fromBB, BasicBlock *toBB, CBERegion *R, bool isElseBranch);
   CBERegion* createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion);
   void createSubRegionOrRecordCurrentRegion(BasicBlock* predBB, BasicBlock* currBB, CBERegion *R, bool isElseBranch);
   BasicBlock* findFirstBrBlock(BasicBlock* entryBlock);
   void markBackEdges(Function &F);
+  bool edgeBelongsToSubRegions(BasicBlock *fromBB, BasicBlock* toBB, CBERegion *R, bool isElseBranch);
+  bool nodeBelongsToRegion(BasicBlock* BB, CBERegion *R, bool isElseBranch);
 
 
   void writeOperandDeref(Value *Operand);
