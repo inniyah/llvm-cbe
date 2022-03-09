@@ -94,6 +94,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<BasicBlock*, CBERegion*> CBERegionMap;
   std::map<CBERegion*, BasicBlock*> recordedRegionBBs;
   bool gepStart;
+  std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
 
 
   CBERegion topRegion;
@@ -320,6 +321,7 @@ private:
   CBERegion* createNewRegion(BasicBlock* entryBB, CBERegion* parentR, bool isElseRegion);
   void createSubRegionOrRecordCurrentRegion(BasicBlock* predBB, BasicBlock* currBB, CBERegion *R, bool isElseBranch);
   BasicBlock* findFirstBrBlock(BasicBlock* entryBlock);
+  void markBackEdges(Function &F);
 
 
   void writeOperandDeref(Value *Operand);
