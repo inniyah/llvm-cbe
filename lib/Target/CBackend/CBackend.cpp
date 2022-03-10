@@ -689,12 +689,40 @@ void CWriter::markBackEdges(Function &F){
 
 void CWriter::determineControlFlowTranslationMethod(Function &F){
   NATURAL_CONTROL_FLOW = true;
+
   for(auto &BB : F){
+
     for(auto &I : BB){
-      if(isa<SwitchInst>(I))
+      if(isa<SwitchInst>(I)){
         NATURAL_CONTROL_FLOW = false;
+        return;
+      }
     }
+
+    if(BasicBlock *uniqueSucc = BB.getUniqueSuccessor()){
+      if(std::next(Function::iterator(&BB)) != Function::iterator(uniqueSucc)){
+        bool isBackEdge = false;
+        for(auto backEdge : backEdges){
+          if(backEdge.first == &BB && backEdge.second == uniqueSucc)
+            isBackEdge = true;
+        }
+
+        bool isExitingFunctionEdge = false;
+        Instruction *term = uniqueSucc->getTerminator();
+        if(isa<ReturnInst>(term) || isa<UnreachableInst>(term))
+          isExitingFunctionEdge = true;
+
+        if(!isBackEdge && !isExitingFunctionEdge){
+          NATURAL_CONTROL_FLOW = false;
+          return;
+        }
+
+      }
+    }
+
   }
+
+
 
 }
 
@@ -715,6 +743,7 @@ bool CWriter::runOnFunction(Function &F) {
   bool Modified = lowerIntrinsics(F);
 
   //SUSAN: determine whether the function can be compiled without gotos
+  markBackEdges(F);
   determineControlFlowTranslationMethod(F);
 
   //SUSAN: preprocessings
@@ -728,7 +757,6 @@ bool CWriter::runOnFunction(Function &F) {
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
   markIfBranches(F, &visitedBBs); //2
-  markBackEdges(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   markBBwithNumOfVisits(F); //5
@@ -3214,34 +3242,34 @@ void CWriter::generateHeader(Module &M) {
       bool isReady2Declare = true;
       GlobalVariable *currGlob = workingList.front();
       workingList.pop();
-      Constant *initializer = currGlob->getInitializer();
 
-      if(ConstantExpr *initializerExpr = dyn_cast<ConstantExpr>(initializer)){
-        if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(initializerExpr) ){
-          Value *v = initializerOp->getPointerOperand();
-          if( GlobalVariable *useGlob = dyn_cast<GlobalVariable>(v) ){
-             if (declared.find(useGlob) == declared.end()){
-               workingList.push(currGlob);
-               isReady2Declare = false;
-             }
-          }
-        }
-      }
-
-      if(ConstantArray *initArr = dyn_cast<ConstantArray>(initializer)){
-        for (Value *Element : initArr->operands()) {
-          if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(Element) ){
+      if(currGlob->hasInitializer()){
+        Constant *initializer = currGlob->getInitializer();
+        if(ConstantExpr *initializerExpr = dyn_cast<ConstantExpr>(initializer))
+          if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(initializerExpr) ){
             Value *v = initializerOp->getPointerOperand();
-            if(GlobalVariable *globElement = dyn_cast<GlobalVariable>(v)){
-              if(declared.find(globElement) == declared.end()){
+            if( GlobalVariable *useGlob = dyn_cast<GlobalVariable>(v) )
+              if (declared.find(useGlob) == declared.end()){
                 workingList.push(currGlob);
                 isReady2Declare = false;
-                break;
               }
-            }
           }
-        }
+
+        if(ConstantArray *initArr = dyn_cast<ConstantArray>(initializer))
+          for (Value *Element : initArr->operands())
+            if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(Element) ){
+              Value *v = initializerOp->getPointerOperand();
+              if(GlobalVariable *globElement = dyn_cast<GlobalVariable>(v))
+                if(declared.find(globElement) == declared.end()){
+                  workingList.push(currGlob);
+                  isReady2Declare = false;
+                  break;
+                }
+            }
+
       }
+
+
 
       if(isReady2Declare){
           declareOneGlobalVariable(currGlob);
