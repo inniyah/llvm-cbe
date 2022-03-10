@@ -327,6 +327,7 @@ private:
   void determineControlFlowTranslationMethod(Function &F);
   void naturalBranchTranslation(BranchInst &I);
   void naturalSwitchTranslation(SwitchInst &SI);
+  std::set<BasicBlock*> findRegionEntriesOfBB (BasicBlock* BB);
 
 
   void writeOperandDeref(Value *Operand);

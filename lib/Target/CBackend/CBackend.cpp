@@ -457,7 +457,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
 void CWriter::markBBwithNumOfVisits(Function &F){
 
   //set up top region
-  topRegion.entryBlock = nullptr;
+  topRegion.entryBlock = &F.getEntryBlock();
   topRegion.parentRegion = nullptr;
   for(auto &BB : F){
    // topRegion.thenBBs.push_back(&BB);
@@ -687,6 +687,34 @@ void CWriter::markBackEdges(Function &F){
 
 }
 
+std::set<BasicBlock*> CWriter::findRegionEntriesOfBB (BasicBlock* BB){
+   std::set<BasicBlock*> entries;
+   std::queue<CBERegion*> toVisit;
+   toVisit.push(&topRegion);
+
+   while(!toVisit.empty()){
+     CBERegion *currNode = toVisit.front();
+     toVisit.pop();
+
+     for(auto regionBB : currNode->thenBBs)
+       if(regionBB == BB && currNode->entryBlock)
+         entries.insert(currNode->entryBlock);
+
+     for(auto regionBB : currNode->elseBBs)
+       if(regionBB == BB && currNode->entryBlock)
+         entries.insert(currNode->entryBlock);
+
+     for(CBERegion *subRegion : currNode->thenSubRegions){
+       toVisit.push(subRegion);
+     }
+     for(CBERegion *subRegion : currNode->elseSubRegions){
+       toVisit.push(subRegion);
+     }
+   }
+
+   return entries;
+}
+
 void CWriter::determineControlFlowTranslationMethod(Function &F){
   NATURAL_CONTROL_FLOW = true;
 
@@ -698,28 +726,42 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
         return;
       }
     }
+  }
 
+
+  markBBwithNumOfVisits(F);
+  for(auto &BB : F){
     if(BasicBlock *uniqueSucc = BB.getUniqueSuccessor()){
       if(std::next(Function::iterator(&BB)) != Function::iterator(uniqueSucc)){
+
+        // if it's a loop backedge then we can translate it
         bool isBackEdge = false;
         for(auto backEdge : backEdges){
           if(backEdge.first == &BB && backEdge.second == uniqueSucc)
             isBackEdge = true;
         }
 
+        // if it's a exiting function edge we can translate it
         bool isExitingFunctionEdge = false;
         Instruction *term = uniqueSucc->getTerminator();
         if(isa<ReturnInst>(term) || isa<UnreachableInst>(term))
           isExitingFunctionEdge = true;
 
-        if(!isBackEdge && !isExitingFunctionEdge){
+        // if its an edge that's branch to a post dominator inside of a cberegion, we can translate it
+        bool isBranchMergeEdge = false;
+        std::set<BasicBlock*> brBlocks = findRegionEntriesOfBB(&BB);
+        for(auto brBB : brBlocks){
+          if(PDT->dominates(uniqueSucc, brBB))
+            isBranchMergeEdge = true;
+        }
+
+        if(!isBackEdge && !isExitingFunctionEdge && !isBranchMergeEdge){
           NATURAL_CONTROL_FLOW = false;
           return;
         }
 
       }
     }
-
   }
 
 
@@ -743,6 +785,8 @@ bool CWriter::runOnFunction(Function &F) {
   bool Modified = lowerIntrinsics(F);
 
   //SUSAN: determine whether the function can be compiled without gotos
+  std::set<BasicBlock*> visitedBBs;
+  markIfBranches(F, &visitedBBs); //2
   markBackEdges(F);
   determineControlFlowTranslationMethod(F);
 
@@ -753,13 +797,10 @@ bool CWriter::runOnFunction(Function &F) {
   //4. identify branches that can be expressed as if statement after split
   //5. mark each basicblock its number of times to be printed
 
-  std::set<BasicBlock*> visitedBBs;
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
-  markIfBranches(F, &visitedBBs); //2
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
-  markBBwithNumOfVisits(F); //5
   collectNoneArrayGEPs(F);
   collectVariables2Deref(F);
 
