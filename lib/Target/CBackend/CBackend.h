@@ -326,6 +326,7 @@ private:
   bool nodeBelongsToRegion(BasicBlock* BB, CBERegion *R, bool isElseBranch);
   void determineControlFlowTranslationMethod(Function &F);
   void naturalBranchTranslation(BranchInst &I);
+  void naturalSwitchTranslation(SwitchInst &SI);
 
 
   void writeOperandDeref(Value *Operand);
