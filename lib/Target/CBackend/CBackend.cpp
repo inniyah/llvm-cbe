@@ -687,6 +687,10 @@ void CWriter::markBackEdges(Function &F){
 
 }
 
+void CWriter::determineControlFlowTranslationMethod(Function &F){
+  NATURAL_CONTROL_FLOW = false;
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   // Do not codegen any 'available_externally' functions at all, they have
@@ -699,9 +703,12 @@ bool CWriter::runOnFunction(Function &F) {
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
-  RI->dump();
+  //RI->dump();
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
+
+  //SUSAN: determine whether the function can be compiled without gotos
+  determineControlFlowTranslationMethod(F);
 
   //SUSAN: preprocessings
   //1. mark all the irregular exits of a loop (break/return)
@@ -4879,15 +4886,14 @@ void CWriter::printFunction(Function &F) {
   for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
     if (Loop *L = LI->getLoopFor(&*BB)) {
       if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
-        //printLoop(L);
-        errs() << "SUSAN: printing loop at 4554\n";
-        printLoopNew(L);
+        if(NATURAL_CONTROL_FLOW)
+          printLoopNew(L);
+        else
+          printLoop(L);
       }
     } else {
       printBasicBlock(&*BB);
       times2bePrinted[&*BB]--;
-      if(BB->getName() == "if.then40")
-        errs() << "SUSAN: times2bePrinted for if.then40 at 4855 = " << times2bePrinted[&*BB];
     }
   }
 
@@ -5019,15 +5025,12 @@ void CWriter::printLoopNew(Loop *L) {
     // Don't print Loop header any more
     if(BB != L->getHeader()){
       if (BBLoop == L){
-
         printBasicBlock(BB);
         times2bePrinted[BB]--;
-        if(BB->getName() == "if.then40")
-        errs() << "SUSAN: times2bePrinted for if.then40 at 4992 = " << times2bePrinted[&*BB] << "\n";
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
-        errs() << "SUSAN: printing loop at 4691\n";
-        printLoopNew(BBLoop);
+        if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
+        else printLoop(BBLoop);
       }
     }
   }
@@ -5051,13 +5054,8 @@ void CWriter::printLoop(Loop *L) {
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
-    if (BBLoop == L){
+    if (BBLoop == L)
       printBasicBlock(BB);
-      times2bePrinted[BB]--;
-      if(BB->getName() == "if.then40")
-        errs() << "SUSAN: times2bePrinted for if.then40 at 5023 = " << times2bePrinted[&*BB];
-      //printedBBs.insert(BB);
-    }
     else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L)
       printLoop(BBLoop);
   }
@@ -5066,14 +5064,15 @@ void CWriter::printLoop(Loop *L) {
 }
 
 void CWriter::printBasicBlock(BasicBlock *BB) {
+
+if( NATURAL_CONTROL_FLOW ){
+  /*
+   * Naturalness: don't need to print labels
+   */
   if(times2bePrinted[BB]<=0){
     errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
     return;
   }
-  //if(printedBBs.find(BB) != printedBBs.end()){
-    //errs() << "SUSAN: BB already printed (could be a bug)" << *BB << "\n";
-    //return;
-  //}
   // Don't print the label for the basic block if there are no uses, or if
   // the only terminator use is the predecessor basic block's terminator.
   // We have to scan the use list because PHI nodes use basic blocks too but
@@ -5089,17 +5088,28 @@ void CWriter::printBasicBlock(BasicBlock *BB) {
     }
     Out << "\n";
   }
+} else {
+  bool NeedsLabel = false;
+  for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI)
+    if (isGotoCodeNecessary(*PI, BB)) {
+      NeedsLabel = true;
+      break;
+    }
+
+  if (NeedsLabel) {
+    Out << GetValueName(BB) << ":";
+    // A label immediately before a late variable declaration is problematic,
+    // because "a label can only be part of a statement and a declaration is not
+    // a statement" (GCC). Adding a ";" is a simple workaround.
+    if (DeclareLocalsLate) {
+      Out << ";";
+    }
+    Out << "\n";
+  }
+}
 
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
-    /*DILocation *Loc = (*II).getDebugLoc();
-    if (Loc != nullptr && LastAnnotatedSourceLine != Loc->getLine()) {
-      Out << "#line " << Loc->getLine() << " \"" << Loc->getDirectory() << "/"
-          << Loc->getFilename() << "\""
-          << "\n";
-      LastAnnotatedSourceLine = Loc->getLine();
-    }*/
-    //Note: If inlinableinst will be recursively written through writeOperandInternal function
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
@@ -5240,17 +5250,8 @@ void CWriter::visitUnreachableInst(UnreachableInst &I) {
 }
 
 bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
-  /// FIXME: This should be reenabled, but loop reordering safe!!
-  //return true;
-
-  //if (std::next(Function::iterator(From)) != Function::iterator(To))
-    //return true; // Not the direct successor, we need a goto.
-
-  // isa<SwitchInst>(From->getTerminator())
-
-  //if (LI->getLoopFor(From) != LI->getLoopFor(To))
-    //return true;
-  return false;
+  if(NATURAL_CONTROL_FLOW) return false;
+  else return true; // Not the direct successor, we need a goto.
 }
 
 void CWriter::printPHICopiesForAllPhis(BasicBlock *CurBlock,
@@ -5307,8 +5308,17 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
 
 void CWriter::printBranchToBlock(BasicBlock *CurBB, BasicBlock *Succ,
                                  unsigned Indent) {
-  BranchInst *br = dyn_cast<BranchInst>(CurBB->getTerminator());
-  if (gotoBranches.find(br) != gotoBranches.end()) {
+  if(NATURAL_CONTROL_FLOW){
+    BranchInst *br = dyn_cast<BranchInst>(CurBB->getTerminator());
+    if (gotoBranches.find(br) != gotoBranches.end()) {
+      Out << std::string(Indent, ' ') << "  goto ";
+      writeOperand(Succ);
+      Out << ";\n";
+    }
+    return;
+  }
+
+  if (isGotoCodeNecessary(CurBB, Succ)) {
     Out << std::string(Indent, ' ') << "  goto ";
     writeOperand(Succ);
     Out << ";\n";
@@ -5503,15 +5513,7 @@ void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
 }
 
 
-
-
-
-
-
-
-// Branch instruction printing - Avoid printing out a branch to a basic block
-// that immediately succeeds the current one.
-void CWriter::visitBranchInst(BranchInst &I) {
+void CWriter::naturalBranchTranslation(BranchInst &I){
   errs() << "SUSAN: emitting branch: " << I << "\n";
   CurInstr = &I;
 
@@ -5663,36 +5665,53 @@ void CWriter::visitBranchInst(BranchInst &I) {
     Out << "}\n";
 
   Out << "\n";
+}
 
- // if (I.isConditional()) {
- //   if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(0))) {
- //     Out << "  if (";
- //     writeOperand(I.getCondition(), ContextCasted);
- //     Out << ") {\n";
 
- //     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
- //     printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
 
- //     if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(1))) {
- //       Out << "  } else {\n";
- //       printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
- //       printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
- //     }
- //   } else {
- //     // First goto not necessary, assume second one is...
- //     Out << "  if (!";
- //     writeOperand(I.getCondition(), ContextCasted);
- //     Out << ") {\n";
 
- //     printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
- //     printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
- //   }
 
- //   Out << "  }\n";
- // } else {
- //   printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
- //   printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
- // }
+// Branch instruction printing - Avoid printing out a branch to a basic block
+// that immediately succeeds the current one.
+void CWriter::visitBranchInst(BranchInst &I) {
+  if(NATURAL_CONTROL_FLOW){
+    naturalBranchTranslation(I);
+    return;
+  }
+
+  CurInstr = &I;
+
+  if (I.isConditional()) {
+    if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(0))) {
+      Out << "  if (";
+      writeOperand(I.getCondition(), ContextCasted);
+      Out << ") {\n";
+
+      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
+      printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
+
+      if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(1))) {
+        Out << "  } else {\n";
+        printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+        printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+      }
+    } else {
+      // First goto not necessary, assume second one is...
+      Out << "  if (!";
+      writeOperand(I.getCondition(), ContextCasted);
+      Out << ") {\n";
+
+      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+      printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+    }
+
+    Out << "  }\n";
+  } else {
+    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+    printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
+  }
+  Out << "\n";
+
 }
 
 // PHI nodes get copied into temporary values at the end of predecessor basic

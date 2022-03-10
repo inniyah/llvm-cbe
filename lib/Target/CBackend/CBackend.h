@@ -95,6 +95,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<CBERegion*, BasicBlock*> recordedRegionBBs;
   bool gepStart;
   std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
+  bool NATURAL_CONTROL_FLOW;
 
 
   CBERegion topRegion;
@@ -323,6 +324,8 @@ private:
   void markBackEdges(Function &F);
   bool edgeBelongsToSubRegions(BasicBlock *fromBB, BasicBlock* toBB, CBERegion *R, bool isElseBranch);
   bool nodeBelongsToRegion(BasicBlock* BB, CBERegion *R, bool isElseBranch);
+  void determineControlFlowTranslationMethod(Function &F);
+  void naturalBranchTranslation(BranchInst &I);
 
 
   void writeOperandDeref(Value *Operand);
