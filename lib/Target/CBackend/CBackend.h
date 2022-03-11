@@ -97,6 +97,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
   bool NATURAL_CONTROL_FLOW;
   std::set<Instruction*> signedInsts;
+  std::map<Instruction*, SExtInst*> declareAsCastedType;
 
 
   CBERegion topRegion;
@@ -329,6 +330,7 @@ private:
   void naturalBranchTranslation(BranchInst &I);
   void naturalSwitchTranslation(SwitchInst &SI);
   std::set<BasicBlock*> findRegionEntriesOfBB (BasicBlock* BB);
+  void findSignedInsts(Instruction* inst, Instruction* signedInst);
 
 
   void writeOperandDeref(Value *Operand);

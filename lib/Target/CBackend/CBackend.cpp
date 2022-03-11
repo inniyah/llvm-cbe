@@ -4682,6 +4682,30 @@ bool CWriter::canDeclareLocalLate(Instruction &I) {
   return true;
 }
 
+void CWriter::findSignedInsts(Instruction* inst, Instruction* signedInst){
+    for (User *U : inst->users()) {
+      if (CmpInst *cmp = dyn_cast<CmpInst>(U)) {
+        switch(cmp->getPredicate()){
+          case CmpInst::ICMP_SLE:
+          case CmpInst::ICMP_SGE:
+          case CmpInst::ICMP_SLT:
+          case CmpInst::ICMP_SGT:
+            signedInsts.insert(signedInst);
+            break;
+          default:
+            break;
+        }
+      } else if(SExtInst * sextInst = dyn_cast<SExtInst>(U)){
+        if(inst->hasOneUse())
+          declareAsCastedType[inst] = sextInst;
+        findSignedInsts(cast<Instruction>(sextInst), inst);
+      } else if (GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(U)){
+        if(inst != dyn_cast<Instruction>(gepInst->getPointerOperand()))
+         signedInsts.insert(signedInst);
+      }
+    }
+}
+
 void CWriter::printFunction(Function &F) {
 
   //SUSAN: collect function argument reference depths
@@ -4894,20 +4918,7 @@ void CWriter::printFunction(Function &F) {
    */
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction* inst = &*I;
-    for (User *U : inst->users()) {
-      if (CmpInst * cmp = dyn_cast<CmpInst>(U)) {
-        switch(cmp->getPredicate()){
-          case CmpInst::ICMP_SLE:
-          case CmpInst::ICMP_SGE:
-          case CmpInst::ICMP_SLT:
-          case CmpInst::ICMP_SGT:
-            signedInsts.insert(inst);
-            break;
-          default:
-            break;
-        }
-      }
-    }
+    findSignedInsts(inst, inst);
   }
 
   // print local variable information for the function
@@ -4916,7 +4927,9 @@ void CWriter::printFunction(Function &F) {
 
       Out << "  ";
 
-      if(signedInsts.find(cast<Instruction>(AI)) != signedInsts.end())
+      if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
+        printTypeNameForAddressableValue(Out, declareAsCastedType[&*I]->getType(), true);
+      else if(signedInsts.find(&*I) != signedInsts.end())
         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
       else
         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
@@ -4935,7 +4948,9 @@ void CWriter::printFunction(Function &F) {
       if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
         Out << "  ";
 
-        if(signedInsts.find(&*I) != signedInsts.end())
+        if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
+          printTypeName(Out, declareAsCastedType[&*I]->getType(), true) << ' ' << GetValueName(&*I);
+        else if(signedInsts.find(&*I) != signedInsts.end())
           printTypeName(Out, I->getType(), true) << ' ' << GetValueName(&*I);
         else
           printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
@@ -4957,8 +4972,17 @@ void CWriter::printFunction(Function &F) {
 
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
         Out << "  ";
-        printTypeName(Out, I->getType(), false)
+
+        if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
+          printTypeName(Out, declareAsCastedType[&*I]->getType(), true)
             << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+        else if(signedInsts.find(&*I) != signedInsts.end())
+          printTypeName(Out, I->getType(), true)
+            << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+        else
+          printTypeName(Out, I->getType(), false)
+            << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+
         Out << ";\n";
 
         // all the insts associated with this variable counts as declared
@@ -6308,6 +6332,13 @@ static const char *getFloatBitCastField(Type *Ty) {
 void CWriter::visitCastInst(CastInst &I) {
   CurInstr = &I;
 
+  //skip translating this cast if not needed
+  for(auto [inst, sexint] : declareAsCastedType)
+    if(sexint == &I){
+      writeOperand(I.getOperand(0));
+      return;
+    }
+
   Type *DstTy = I.getType();
   Type *SrcTy = I.getOperand(0)->getType();
 
@@ -7406,7 +7437,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       Out << '(';
       writeOperandInternal(Ptr, ContextNormal, false);
       Out << '+';
-      writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
+      writeOperand(FirstOp);
       Out << ')';
     }
     else{
@@ -7423,13 +7454,13 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
           Out << "*(";
           writeOperandInternal(Ptr, ContextNormal, false);
           Out << '+';
-          writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
+          writeOperand(FirstOp);
           Out << ')';
         }
         else{
           writeOperandInternal(Ptr, ContextNormal, false);
           Out << '[';
-          writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
+          writeOperand(FirstOp);
           Out << ']';
         }
         currGEPisPointer = false;
@@ -7438,7 +7469,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         Out << '(';
         writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
-        writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
+        writeOperand(FirstOp);
         Out << ')';
       }
     }
@@ -7449,7 +7480,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         Out << '(';
         writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
-        writeOperandWithCast(FirstOp, Instruction::GetElementPtr, false);
+        writeOperand(FirstOp);
         Out << ')';
       }
       else{
@@ -7483,7 +7514,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           Out << '[';
-          writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
+          writeOperand(Opnd);
           Out << ']';
           isPointer = false;
         }
@@ -7494,7 +7525,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           Out << '[';
-          writeOperandWithCast(Opnd, Instruction::GetElementPtr, false);
+          writeOperand(Opnd);
           Out << ']';
           isPointer = false;
         }
