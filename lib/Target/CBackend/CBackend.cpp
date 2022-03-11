@@ -4696,8 +4696,12 @@ void CWriter::findSignedInsts(Instruction* inst, Instruction* signedInst){
             break;
         }
       } else if(SExtInst * sextInst = dyn_cast<SExtInst>(U)){
-        if(inst->hasOneUse())
-          declareAsCastedType[inst] = sextInst;
+
+        if(inst->hasOneUse()
+            || (sextInst->hasOneUse() &&
+                isa<GetElementPtrInst>(*sextInst->user_back())))
+          declareAsCastedType[sextInst] = inst;
+
         findSignedInsts(cast<Instruction>(sextInst), inst);
       } else if (GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(U)){
         if(inst != dyn_cast<Instruction>(gepInst->getPointerOperand()))
@@ -4927,12 +4931,20 @@ void CWriter::printFunction(Function &F) {
 
       Out << "  ";
 
-      if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
-        printTypeNameForAddressableValue(Out, declareAsCastedType[&*I]->getType(), true);
-      else if(signedInsts.find(&*I) != signedInsts.end())
-        printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
-      else
-        printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+      bool printedType = false;
+      for(auto [sextInst, inst] : declareAsCastedType)
+        if(inst == &*I){
+          printTypeNameForAddressableValue(Out, sextInst->getType(), true);
+          printedType = true;
+          break;
+        }
+
+      if(!printedType){
+        if(signedInsts.find(&*I) != signedInsts.end())
+          printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
+        else
+          printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+      }
 
       Out << ' ' << GetValueName(AI);
 
@@ -4948,12 +4960,20 @@ void CWriter::printFunction(Function &F) {
       if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
         Out << "  ";
 
-        if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
-          printTypeName(Out, declareAsCastedType[&*I]->getType(), true) << ' ' << GetValueName(&*I);
-        else if(signedInsts.find(&*I) != signedInsts.end())
-          printTypeName(Out, I->getType(), true) << ' ' << GetValueName(&*I);
-        else
-          printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
+        bool printedType = false;
+        for(auto [sextInst, inst] : declareAsCastedType)
+          if(inst == &*I){
+            printTypeName(Out, sextInst->getType(), true) << ' ' << GetValueName(&*I);
+            printedType = true;
+            break;
+          }
+
+        if(!printedType){
+          if(signedInsts.find(&*I) != signedInsts.end())
+            printTypeName(Out, I->getType(), true) << ' ' << GetValueName(&*I);
+          else
+            printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
+        }
 
         Out << ";\n";
 
@@ -4973,15 +4993,23 @@ void CWriter::printFunction(Function &F) {
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
         Out << "  ";
 
-        if(declareAsCastedType.find(&*I) != declareAsCastedType.end())
-          printTypeName(Out, declareAsCastedType[&*I]->getType(), true)
-            << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-        else if(signedInsts.find(&*I) != signedInsts.end())
-          printTypeName(Out, I->getType(), true)
-            << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-        else
-          printTypeName(Out, I->getType(), false)
-            << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+        bool printedType = false;
+        for(auto [sextInst, inst] : declareAsCastedType)
+          if(inst == &*I){
+            printTypeName(Out, sextInst->getType(), true)
+              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+            printedType = true;
+            break;
+          }
+
+        if(!printedType){
+          if(signedInsts.find(&*I) != signedInsts.end())
+            printTypeName(Out, I->getType(), true)
+              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+          else
+            printTypeName(Out, I->getType(), false)
+              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+        }
 
         Out << ";\n";
 
@@ -6333,11 +6361,11 @@ void CWriter::visitCastInst(CastInst &I) {
   CurInstr = &I;
 
   //skip translating this cast if not needed
-  for(auto [inst, sexint] : declareAsCastedType)
-    if(sexint == &I){
+  SExtInst *sextinst = dyn_cast<SExtInst>(&I);
+  if(sextinst && declareAsCastedType.find(sextinst) != declareAsCastedType.end()){
       writeOperand(I.getOperand(0));
       return;
-    }
+  }
 
   Type *DstTy = I.getType();
   Type *SrcTy = I.getOperand(0)->getType();
