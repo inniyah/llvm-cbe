@@ -6227,38 +6227,31 @@ void CWriter::visitICmpInst(ICmpInst &I) {
   // Certain icmp predicate require the operand to be forced to a specific type
   // so we use writeOperandWithCast here instead of writeOperand. Similarly
   // below for operand 1
-  writeOperandWithCast(I.getOperand(0), I);
 
-  printCmpOperator(&I);
-  /*switch (I.getPredicate()) {
-  case ICmpInst::ICMP_EQ:
-    Out << " == ";
-    break;
-  case ICmpInst::ICMP_NE:
-    Out << " != ";
-    break;
-  case ICmpInst::ICMP_ULE:
-  case ICmpInst::ICMP_SLE:
-    Out << " <= ";
-    break;
-  case ICmpInst::ICMP_UGE:
-  case ICmpInst::ICMP_SGE:
-    Out << " >= ";
-    break;
-  case ICmpInst::ICMP_ULT:
-  case ICmpInst::ICMP_SLT:
-    Out << " < ";
-    break;
-  case ICmpInst::ICMP_UGT:
-  case ICmpInst::ICMP_SGT:
-    Out << " > ";
-    break;
-  default:
-    DBG_ERRS("Invalid icmp predicate!" << I);
-    errorWithMessage("invalid icmp predicate");
-  }*/
-
-  writeOperandWithCast(I.getOperand(1), I);
+  Instruction *op0 = dyn_cast<Instruction>(I.getOperand(0));
+  Instruction *op1 = dyn_cast<Instruction>(I.getOperand(1));
+  if(I.isSigned()){
+    if(!op0 || (op0 && signedInsts.find(op0) != signedInsts.end()))
+      writeOperand(I.getOperand(0));
+    else
+      writeOperandWithCast(I.getOperand(0), I);
+    printCmpOperator(&I);
+    if(!op1 || (op1 && signedInsts.find(op1) != signedInsts.end()))
+      writeOperand(I.getOperand(1));
+    else
+      writeOperandWithCast(I.getOperand(1), I);
+  }
+  else{
+    if(!op0 || (op0 && signedInsts.find(op0) == signedInsts.end()))
+      writeOperand(I.getOperand(0));
+    else
+      writeOperandWithCast(I.getOperand(0), I);
+    printCmpOperator(&I);
+    if(!op1 || (op1 && signedInsts.find(op1) == signedInsts.end()))
+      writeOperand(I.getOperand(1));
+    else
+      writeOperandWithCast(I.getOperand(1), I);
+  }
   if (NeedsClosingParens)
     Out << "))";
 }
