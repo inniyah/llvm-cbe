@@ -96,6 +96,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool gepStart;
   std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
   bool NATURAL_CONTROL_FLOW;
+  std::set<Instruction*> signedInsts;
 
 
   CBERegion topRegion;

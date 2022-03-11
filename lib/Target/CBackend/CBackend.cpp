@@ -4889,12 +4889,38 @@ void CWriter::printFunction(Function &F) {
           }
 
 
+  /*
+   * Naturalness: avoid cast by checking the use of the variable before it's declared
+   */
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    Instruction* inst = &*I;
+    for (User *U : inst->users()) {
+      if (CmpInst * cmp = dyn_cast<CmpInst>(U)) {
+        switch(cmp->getPredicate()){
+          case CmpInst::ICMP_SLE:
+          case CmpInst::ICMP_SGE:
+          case CmpInst::ICMP_SLT:
+          case CmpInst::ICMP_SGT:
+            signedInsts.insert(inst);
+            break;
+          default:
+            break;
+        }
+      }
+    }
+  }
+
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
 
       Out << "  ";
-      printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+
+      if(signedInsts.find(cast<Instruction>(AI)) != signedInsts.end())
+        printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
+      else
+        printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+
       Out << ' ' << GetValueName(AI);
 
       ArrayType *ArrTy = dyn_cast<ArrayType>(AI->getAllocatedType());
@@ -4908,7 +4934,12 @@ void CWriter::printFunction(Function &F) {
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
       if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
         Out << "  ";
-        printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
+
+        if(signedInsts.find(&*I) != signedInsts.end())
+          printTypeName(Out, I->getType(), true) << ' ' << GetValueName(&*I);
+        else
+          printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
+
         Out << ";\n";
 
         // all the insts associated with this variable counts as declared
