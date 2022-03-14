@@ -98,6 +98,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool NATURAL_CONTROL_FLOW;
   std::set<Instruction*> signedInsts;
   std::map<SExtInst*, Instruction*> declareAsCastedType;
+  std::set<StringRef> signedVars;
 
 
   CBERegion topRegion;

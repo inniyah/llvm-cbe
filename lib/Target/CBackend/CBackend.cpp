@@ -1940,13 +1940,11 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     } else if (Ty->getPrimitiveSizeInBits() < 32 && Context == ContextNormal) {
       Out << "((";
       printSimpleType(Out, Ty, false) << ')';
-      if (CI->isMinValue(true))
-        Out << CI->getZExtValue() << 'u';
-      else
-        Out << CI->getSExtValue();
+      Out << CI->getSExtValue();
       Out << ')';
     } else if (Ty->getPrimitiveSizeInBits() <= 32) {
-      Out << CI->getZExtValue() << 'u';
+      //Out << CI->getZExtValue() << 'u';
+      Out << CI->getZExtValue();
     } else if (Ty->getPrimitiveSizeInBits() <= 64) {
       Out << "UINT64_C(" << CI->getZExtValue() << ")";
     } else if (Ty->getPrimitiveSizeInBits() <= 128) {
@@ -4708,6 +4706,8 @@ void CWriter::findSignedInsts(Instruction* inst, Instruction* signedInst){
          signedInsts.insert(signedInst);
       }
     }
+
+
 }
 
 void CWriter::printFunction(Function &F) {
@@ -4924,6 +4924,13 @@ void CWriter::printFunction(Function &F) {
     Instruction* inst = &*I;
     findSignedInsts(inst, inst);
   }
+  //if signedInsts have corresponding variable, then that variable is signed
+  for(auto signedInst : signedInsts)
+    if(IR2vars.find(signedInst) != IR2vars.end())
+      for(auto var : IR2vars[signedInst])
+        if(Var2IRs.find(var) != Var2IRs.end())
+          for(auto ir : Var2IRs[var])
+            signedInsts.insert(ir);
 
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
@@ -4958,6 +4965,7 @@ void CWriter::printFunction(Function &F) {
       PrintedVar = true;
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
       if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
+        errs() << "SUSAN: declaring " << *I << "\n";
         Out << "  ";
 
         bool printedType = false;
