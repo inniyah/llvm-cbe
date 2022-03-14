@@ -380,8 +380,10 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
         // if succBB of exitBB is returning, don't print break, print return block
         for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
 	        BasicBlock *retBB = *ret;
-          currRegion->thenEdges.push_back(std::make_pair(exitBB, retBB));
-          currRegion->thenBBs.push_back(retBB);
+          if(retBB && !nodeBelongsToRegion(retBB, currRegion)){
+            currRegion->thenEdges.push_back(std::make_pair(exitBB, retBB));
+            currRegion->thenBBs.push_back(retBB);
+          }
         }
 
         if(exitLoopFalseBB)
@@ -397,7 +399,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
           currRegion);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != trueStartBB){
+      if(ret && !nodeBelongsToRegion(ret, currRegion) && ret != trueStartBB){
         if(ret == trueStartBB)
           currRegion->thenEdges.push_back(std::make_pair(brBB, ret));
         else
@@ -415,7 +417,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
             currRegion);
 
       BasicBlock *ret = isExitingFunction(falseStartBB);
-      if(ret && ret != falseStartBB){
+      if(ret && !nodeBelongsToRegion(ret, currRegion) && ret != falseStartBB){
         if(ret == trueStartBB)
           currRegion->thenEdges.push_back(std::make_pair(brBB, ret));
         else
@@ -432,7 +434,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
             currRegion);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && ret != trueStartBB){
+      if(ret && !nodeBelongsToRegion(ret, currRegion) && ret != trueStartBB){
         if(ret == trueStartBB)
           currRegion->thenEdges.push_back(std::make_pair(brBB, ret));
         else
@@ -443,7 +445,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
             currRegion, true);
 
       ret = isExitingFunction(falseStartBB);
-      if(ret && ret != falseStartBB){
+      if(ret && !nodeBelongsToRegion(ret, currRegion, true) && ret != falseStartBB){
         if(ret == trueStartBB)
           currRegion->elseEdges.push_back(std::make_pair(brBB, ret));
         else
@@ -457,7 +459,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
 void CWriter::markBBwithNumOfVisits(Function &F){
 
   //set up top region
-  topRegion.entryBlock = &F.getEntryBlock();
+  topRegion.entryBlock = nullptr;
   topRegion.parentRegion = nullptr;
   for(auto &BB : F){
    // topRegion.thenBBs.push_back(&BB);
@@ -5610,6 +5612,11 @@ void CWriter::emitSwitchBlock(BasicBlock* start, BasicBlock *brBlock){
 
 bool CWriter::edgeBelongsToSubRegions(BasicBlock *fromBB, BasicBlock* toBB,
                                   CBERegion *R, bool isElseBranch){
+  auto currRedges = isElseBranch? R->elseEdges : R->thenEdges;
+  for(auto edge : currRedges)
+    if(edge.first == fromBB && edge.second == toBB)
+      return true;
+
    std::queue<CBERegion*> toVisit;
    if(isElseBranch)
      for(auto subR : R->elseSubRegions)

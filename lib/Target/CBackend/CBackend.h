@@ -326,7 +326,7 @@ private:
   BasicBlock* findFirstBrBlock(BasicBlock* entryBlock);
   void markBackEdges(Function &F);
   bool edgeBelongsToSubRegions(BasicBlock *fromBB, BasicBlock* toBB, CBERegion *R, bool isElseBranch);
-  bool nodeBelongsToRegion(BasicBlock* BB, CBERegion *R, bool isElseBranch);
+  bool nodeBelongsToRegion(BasicBlock* BB, CBERegion *R, bool isElseBranch = false);
   void determineControlFlowTranslationMethod(Function &F);
   void naturalBranchTranslation(BranchInst &I);
   void naturalSwitchTranslation(SwitchInst &SI);
