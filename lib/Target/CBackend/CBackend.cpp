@@ -128,6 +128,12 @@ static bool isConstantNull(Value *V) {
   return false;
 }
 
+static bool isNegative(Value *V){
+  if (ConstantInt *C = dyn_cast<ConstantInt>(V))
+    return C->isNegative();
+  return false;
+}
+
 static bool isEmptyType(Type *Ty) {
   if (StructType *STy = dyn_cast<StructType>(Ty))
     return STy->getNumElements() == 0 ||
@@ -1946,7 +1952,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       Out << ')';
     } else if (Ty->getPrimitiveSizeInBits() <= 32) {
       //Out << CI->getZExtValue() << 'u';
-      Out << CI->getZExtValue();
+      Out << CI->getSExtValue();
     } else if (Ty->getPrimitiveSizeInBits() <= 64) {
       Out << "UINT64_C(" << CI->getZExtValue() << ")";
     } else if (Ty->getPrimitiveSizeInBits() <= 128) {
@@ -7479,9 +7485,16 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     if(!isConstantNull(FirstOp)){
       Out << '(';
       writeOperandInternal(Ptr, ContextNormal, false);
-      Out << '+';
-      writeOperand(FirstOp);
-      Out << ')';
+      if(!isNegative(FirstOp)){
+        Out << '+';
+        writeOperand(FirstOp);
+        Out << ')';
+      }
+      else{
+        errs() << "SUSAN: found negative int" << *FirstOp << "\n";
+        writeOperand(FirstOp);
+        Out << ')';
+      }
     }
     else{
       writeOperandInternal(Ptr, ContextNormal, false);
