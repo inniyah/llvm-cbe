@@ -789,6 +789,12 @@ void CWriter::markPHIs2Print(Function &F){
 }
 
 bool CWriter::runOnFunction(Function &F) {
+  /*
+   * OpenMP: skip translating omp runtime calls
+   */
+  if(F.getName().contains(".omp")){
+    return false;
+  }
 
   // Do not codegen any 'available_externally' functions at all, they have
   // definitions outside the translation unit.
@@ -6937,6 +6943,14 @@ bool CWriter::lowerIntrinsics(Function &F) {
 
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
+
+  /*
+   * OpenMP: skip omp runtime call
+   */
+  if(Function *F = I.getCalledFunction()){
+    if(F->getName() == "__kmpc_fork_call")
+      return;
+  }
 
   if (isa<InlineAsm>(I.getCalledOperand()))
     return visitInlineAsm(I);
