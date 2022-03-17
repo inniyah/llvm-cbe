@@ -776,6 +776,18 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
 
 }
 
+void CWriter::markPHIs2Print(Function &F){
+
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
+    if(!isa<PHINode>(&*I)) continue;
+    PHINode* phi = cast<PHINode>(&*I);
+    for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
+      BasicBlock* predBB = phi->getIncomingBlock(i);
+      PHIValues2Print.insert(std::make_pair(predBB, phi));
+    }
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   // Do not codegen any 'available_externally' functions at all, they have
@@ -807,6 +819,7 @@ bool CWriter::runOnFunction(Function &F) {
 
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
+  markPHIs2Print(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   collectNoneArrayGEPs(F);
@@ -2268,9 +2281,12 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
 std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: where the vairable names are printed
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
-  for (auto const& [var, insts] : Var2IRs)
-    for (auto &inst : insts)
-      if(inst == operandInst) return var;
+  for(auto inst2var : IRNaming)
+    if(inst2var.first == operandInst)
+      return inst2var.second;
+  //for (auto const& [var, insts] : Var2IRs)
+    //for (auto &inst : insts)
+      //if(inst == operandInst) return var;
 
 
   // Resolve potential alias.
@@ -4656,18 +4672,18 @@ static inline bool isFPIntBitCast(Instruction &I) {
 bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
   // If there is no mapping between IR and variable, then there's no duplication
   //if(IR2VarName.find(I) == IR2VarName.end()) return true;
-  for (auto const& [var, insts] : Var2IRs){
-    for (auto &inst : insts){
-      if(I == inst){
-        auto Vars2Emit = isPhi? &phiVars : &allVars;
-        for(auto &var2emit : *Vars2Emit){
-          if(var2emit == var){
-            Vars2Emit->erase(var2emit);
-            return true;
-          }
+  for(auto inst2var : IRNaming){
+    auto inst = inst2var.first;
+    auto var = inst2var.second;
+    if(I == inst){
+      auto Vars2Emit = isPhi? &phiVars : &allVars;
+      for(auto &var2emit : *Vars2Emit){
+        if(var2emit == var){
+          Vars2Emit->erase(var2emit);
+          return true;
         }
-        return false;
       }
+      return false;
     }
   }
   return true;
@@ -4716,6 +4732,23 @@ void CWriter::findSignedInsts(Instruction* inst, Instruction* signedInst){
     }
 
 
+}
+
+void CWriter::insertDeclaredInsts(Instruction* I){
+  // all the insts associated with this variable counts as declared
+  // Shouldn't need this code here but in case there exists empty phi
+  std::set<StringRef> declareVars;
+  for(auto inst2var : IRNaming)
+    if(inst2var.first == I)
+      declareVars.insert(inst2var.second);
+
+  for(auto var : declareVars)
+    for(auto inst2var : IRNaming)
+      if(inst2var.second == var)
+        declaredInsts.insert(inst2var.first);
+
+  if(declareVars.empty())
+    declaredInsts.insert(I);
 }
 
 void CWriter::printFunction(Function &F) {
@@ -4823,6 +4856,9 @@ void CWriter::printFunction(Function &F) {
                 if( IR2vars.find(valInst) == IR2vars.end() )
                   IR2vars[valInst] = std::set<StringRef>();
                 IR2vars[valInst].insert(varName);
+
+                //try: build just IRNaming
+                IRNaming.insert(std::make_pair(valInst, varName));
               }
             }
             else assert(0 && "SUSAN: 1st argument is not a Value?\n");
@@ -4832,10 +4868,9 @@ void CWriter::printFunction(Function &F) {
   }
 
   std::set<StringRef> vars2record;
-  for(const auto &[inst, vars] : IR2vars)
-    if(vars.size() > 1){
-      vars2record.insert(vars.begin(), vars.end());
-    }
+  for(auto inst2var : IRNaming){
+    vars2record.insert(inst2var.second);
+  }
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction *currInst = &*I;
@@ -4845,6 +4880,7 @@ void CWriter::printFunction(Function &F) {
     MRVar2ValMap[currInst] = var2val;
   }
 
+  // build the MRVar2ValMap
   std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap, currMRVar2ValMap;
   do{
     prevMRVar2ValMap = MRVar2ValMap;
@@ -4855,9 +4891,12 @@ void CWriter::printFunction(Function &F) {
         Instruction *currInst = &I;
 
         std::set<StringRef> vars2gen;
-        if(IR2vars.find(currInst) != IR2vars.end())
-          vars2gen.insert(IR2vars[currInst].begin(),
-                             IR2vars[currInst].end());
+        for(auto inst2var : IRNaming)
+          if(currInst == inst2var.first)
+            vars2gen.insert(inst2var.second);
+        //if(IR2vars.find(currInst) != IR2vars.end())
+        //  vars2gen.insert(IR2vars[currInst].begin(),
+        //                     IR2vars[currInst].end());
 
 
 
@@ -4901,28 +4940,72 @@ void CWriter::printFunction(Function &F) {
   } while(!changeMapValue(prevMRVar2ValMap, currMRVar2ValMap));
 
   //test the table
-//  for(auto &[inst, var2val]: MRVar2ValMap){
-//    errs() << "SUSAN: inst:" << *inst << "\n";
-//    for(auto &[var, val] : var2val){
-//      if(val)
-//        errs() << var << ":" << *val << "\n";
-//    }
-//  }
+  for(auto &[inst, var2val]: MRVar2ValMap){
+    errs() << "SUSAN: inst:" << *inst << "\n";
+    for(auto &[var, val] : var2val){
+      if(val)
+        errs() << var << ":" << *val << "\n";
+    }
+  }
 
   // find the contradicting cases and delete them in Var2IRs table
   // Contradicting: if at any instruction I1, it uses I2, but I2 has two coressponding
   // variable v1 and v2, however only v2 has value I2 at this point, then the v1 -> I2 mapping needs to be deleted
+  std::vector<std::pair<Instruction*, StringRef>> instVarPair2Delete;
   for(auto &[inst, var2val]: MRVar2ValMap)
     for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i)
       if(Instruction *operand = dyn_cast<Instruction>(inst->getOperand(i)))
         for(auto &[var, valAtOperand] : var2val)
           if (operand == valAtOperand){
-            for(auto &var2erase : IR2vars[operand])
-              if(var2erase != var)
-                Var2IRs[var2erase].erase(operand);
+
+            for(auto pair : IRNaming){
+              if(pair.first == operand){
+                auto var2erase = pair.second;
+                if(var2erase != var){
+                  Var2IRs[var2erase].erase(operand);
+                  for (auto inst2var : IRNaming)
+                    if(inst2var.first == operand && inst2var.second == var2erase)
+                      instVarPair2Delete.push_back(inst2var);
+                }
+              }
+            }
+
             IR2vars[operand] = std::set<StringRef>();
             IR2vars[operand].insert(var);
+            IRNaming.insert(std::make_pair(operand, var));
           }
+
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    Instruction* inst = &*I;
+    auto MRVar2Vals = MRVar2ValMap[inst];
+    if(MRVar2Vals.empty()) continue;
+
+    for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i)
+      if(Instruction *operand = dyn_cast<Instruction>(inst->getOperand(i)))
+        for(auto inst2var : IRNaming)
+          if(operand == inst2var.first){
+            auto var = inst2var.second;
+            if(MRVar2Vals.find(var) != MRVar2Vals.end()
+                && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
+                errs() << "deleting operand: " << *operand << "\n";
+                errs() << "deleting corresponding var val: " << *MRVar2Vals[var] << "\n";
+                for(auto pair : IRNaming)
+                  if( (pair.first == operand && pair.second == var)
+                      || (pair.first == MRVar2Vals[var] && pair.second == var) )
+                    instVarPair2Delete.push_back(pair);
+            }
+          }
+  }
+
+  for(auto deletePair : instVarPair2Delete){
+    IR2vars[deletePair.first].erase(deletePair.second);
+    IRNaming.erase(deletePair);
+  }
+
+  errs() << "=========================SUSAN: IR NAMING=====================\n";
+  for(auto inst2var : IRNaming){
+    errs() << *inst2var.first << " -> " << inst2var.second << "\n";
+  }
 
 
   /*
@@ -4933,12 +5016,16 @@ void CWriter::printFunction(Function &F) {
     findSignedInsts(inst, inst);
   }
   //if signedInsts have corresponding variable, then that variable is signed
+  std::set<StringRef> signedVars;
   for(auto signedInst : signedInsts)
-    if(IR2vars.find(signedInst) != IR2vars.end())
-      for(auto var : IR2vars[signedInst])
-        if(Var2IRs.find(var) != Var2IRs.end())
-          for(auto ir : Var2IRs[var])
-            signedInsts.insert(ir);
+    for(auto inst2var : IRNaming)
+      if(inst2var.first == signedInst)
+        signedVars.insert(inst2var.second);
+
+  for(auto signedVar : signedVars)
+    for(auto inst2var : IRNaming)
+      if(inst2var.second == signedVar)
+        signedInsts.insert(inst2var.first);
 
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
@@ -4993,17 +5080,8 @@ void CWriter::printFunction(Function &F) {
 
         Out << ";\n";
 
-        // all the insts associated with this variable counts as declared
-        // Shouldn't need this code here but in case there exists empty phi
-        bool foundVar = false;
-        for (auto const& [var, insts] : Var2IRs)
-          for (auto &inst : insts)
-            if(inst == &*I){
-              declaredInsts.insert(insts.begin(), insts.end());
-              foundVar = true;
-            }
-        if(!foundVar)
-          declaredInsts.insert(&*I);
+        insertDeclaredInsts(&*I);
+
       }
 
       if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
@@ -5031,15 +5109,7 @@ void CWriter::printFunction(Function &F) {
 
         // all the insts associated with this variable counts as declared
         // Shouldn't need this code here but in case there exists empty phi
-        bool foundVar = false;
-        for (auto const& [var, insts] : Var2IRs)
-          for (auto &inst : insts)
-            if(inst == &*I){
-              declaredInsts.insert(insts.begin(), insts.end());
-              foundVar = true;
-            }
-        if(!foundVar)
-          declaredInsts.insert(&*I);
+        insertDeclaredInsts(&*I);
       }
       PrintedVar = true;
     }
@@ -5197,6 +5267,8 @@ void CWriter::printLoopNew(Loop *L) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
 
+
+
     // Don't print Loop header any more
     if(BB != L->getHeader()){
       if (BBLoop == L){
@@ -5208,6 +5280,8 @@ void CWriter::printLoopNew(Loop *L) {
         else printLoop(BBLoop);
       }
     }
+
+
   }
 
   if(condInst){
@@ -5297,6 +5371,23 @@ if( NATURAL_CONTROL_FLOW ){
       Out << ";\n";
     }
   }
+
+  //check if a phi value need to be printed
+  std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2erase;
+  for(auto bb2phi : PHIValues2Print){
+    if(bb2phi.first == BB){
+      PHINode *phi = bb2phi.second;
+      Out << std::string(2, ' ');
+      Out << "  " << GetValueName(cast<Instruction>(phi))
+          << "__PHI_TEMPORARY = ";
+      writeOperand(phi->getIncomingValueForBlock(BB), ContextCasted);
+      Out << ";   /* for PHI node */\n";
+      PHIValues2erase.insert(bb2phi);
+    }
+  }
+
+  for(auto erasePhi : PHIValues2erase)
+    PHIValues2Print.erase(erasePhi);
 
   // Don't emit prefix or suffix for the terminator.
   visit(*BB->getTerminator());
@@ -5491,6 +5582,14 @@ bool CWriter::isGotoCodeNecessary(BasicBlock *From, BasicBlock *To) {
   else return true; // Not the direct successor, we need a goto.
 }
 
+bool CWriter::alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi){
+
+  for(auto bb2phi : PHIValues2Print)
+    if(bb2phi.first == predBB && bb2phi.second == phi) return false;
+
+  return true;
+}
+
 void CWriter::printPHICopiesForAllPhis(BasicBlock *CurBlock,
                                         unsigned Indent) {
   std::queue<BasicBlock*> toVisit;
@@ -5507,7 +5606,8 @@ void CWriter::printPHICopiesForAllPhis(BasicBlock *CurBlock,
         //print phi value for the successors
         for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
           PHINode *PN = cast<PHINode>(I);
-          if(PN->getBasicBlockIndex(CurBlock) >= 0){
+          if(PN->getBasicBlockIndex(CurBlock) >= 0 && !alreadyPrintedPHIVal(CurBlock, PN)){
+            printedPHIValues.insert(std::make_pair(CurBlock, PN));
             // Now we have to do the printing.
             Value *IV = PN->getIncomingValueForBlock(CurBlock);
             if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
@@ -5532,7 +5632,8 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
     PHINode *PN = cast<PHINode>(I);
     // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
-    if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
+    if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType()) && !alreadyPrintedPHIVal(CurBlock, PN)) {
+      printedPHIValues.insert(std::make_pair(CurBlock, PN));
       //errs() << "SUSAN: for curBlock:" << *CurBlock << "\n Successor: " <<
         //*Successor << "\n printing PHI:" << *PN << "\n";
       Out << std::string(Indent, ' ');

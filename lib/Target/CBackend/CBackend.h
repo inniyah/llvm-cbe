@@ -75,6 +75,9 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<Instruction*, std::map<StringRef, Instruction*>> MRVar2ValMap;
   std::map<StringRef,std::set<Instruction*>>Var2IRs;
   std::map<Instruction*, std::set<StringRef>>IR2vars;
+
+  std::set<std::pair<Instruction*, StringRef>> IRNaming;
+
   std::set<StringRef>allVars, phiVars;
   //std::set<BasicBlock*>printedBBs;
   std::map<BasicBlock*, int> times2bePrinted;
@@ -98,7 +101,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool NATURAL_CONTROL_FLOW;
   std::set<Instruction*> signedInsts;
   std::map<SExtInst*, Instruction*> declareAsCastedType;
-  std::set<StringRef> signedVars;
+  std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
+  std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
 
 
   CBERegion topRegion;
@@ -332,6 +336,9 @@ private:
   void naturalSwitchTranslation(SwitchInst &SI);
   std::set<BasicBlock*> findRegionEntriesOfBB (BasicBlock* BB);
   void findSignedInsts(Instruction* inst, Instruction* signedInst);
+  void insertDeclaredInsts(Instruction* I);
+  bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
+  void markPHIs2Print(Function &F);
 
 
   void writeOperandDeref(Value *Operand);
