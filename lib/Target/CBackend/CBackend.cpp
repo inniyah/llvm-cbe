@@ -789,12 +789,7 @@ void CWriter::markPHIs2Print(Function &F){
 }
 
 bool CWriter::runOnFunction(Function &F) {
-  /*
-   * OpenMP: skip translating omp runtime calls
-   */
-  if(F.getName().contains(".omp")){
-    return false;
-  }
+
 
   // Do not codegen any 'available_externally' functions at all, they have
   // definitions outside the translation unit.
@@ -806,6 +801,15 @@ bool CWriter::runOnFunction(Function &F) {
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
+
+  /*
+   * OpenMP: skip translating omp runtime calls
+   */
+  if(ompFuncs.find(&F) != ompFuncs.end()){
+    emitOmpRegion(&F);
+    return false;
+  }
+
   //RI->dump();
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
@@ -6941,6 +6945,14 @@ bool CWriter::lowerIntrinsics(Function &F) {
   return LoweredAny;
 }
 
+void CWriter::emitOmpRegion(Function *F){
+  for(auto &BB : *F){
+    Loop *L = LI->getLoopFor(&BB);
+    if(L)
+      errs() << "SUSAN: found omp loop!!!" << *L << "\n";
+  }
+}
+
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
 
@@ -6957,6 +6969,8 @@ void CWriter::visitCallInst(CallInst &I) {
       else
         utask = dyn_cast<Function>(I.getArgOperand(2));
 
+      ompFuncs.insert(utask);
+      runOnFunction(*utask);
       return;
     }
   }

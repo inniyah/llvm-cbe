@@ -103,6 +103,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<SExtInst*, Instruction*> declareAsCastedType;
   std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
   std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
+  std::set<Function*> ompFuncs;
 
 
   CBERegion topRegion;
@@ -339,6 +340,7 @@ private:
   void insertDeclaredInsts(Instruction* I);
   bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
   void markPHIs2Print(Function &F);
+  void emitOmpRegion(Function *F);
 
 
   void writeOperandDeref(Value *Operand);
