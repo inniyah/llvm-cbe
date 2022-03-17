@@ -6948,8 +6948,17 @@ void CWriter::visitCallInst(CallInst &I) {
    * OpenMP: skip omp runtime call
    */
   if(Function *F = I.getCalledFunction()){
-    if(F->getName() == "__kmpc_fork_call")
+    if(F->getName() == "__kmpc_fork_call"){
+      Out << "  #pragma omp parallel for\n" << "\n";
+      ConstantExpr* utaskCast = dyn_cast<ConstantExpr>(I.getArgOperand(2));
+      Function* utask;
+      if(utask && utaskCast->isCast())
+        utask = dyn_cast<Function>(utaskCast->getOperand(0));
+      else
+        utask = dyn_cast<Function>(I.getArgOperand(2));
+
       return;
+    }
   }
 
   if (isa<InlineAsm>(I.getCalledOperand()))
