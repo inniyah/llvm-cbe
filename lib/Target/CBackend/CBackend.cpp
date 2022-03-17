@@ -806,7 +806,7 @@ bool CWriter::runOnFunction(Function &F) {
    * OpenMP: skip translating omp runtime calls
    */
   if(ompFuncs.find(&F) != ompFuncs.end()){
-    emitOmpRegion(&F);
+    //emitOmpRegion(&F);
     return false;
   }
 
@@ -5209,7 +5209,6 @@ void CWriter::printLoopNew(Loop *L) {
   std::vector<Instruction*> exitConditionUpdates;
 
   BasicBlock *header = L->getHeader();
-  errs() << "SUSAN: header: " << *header << "\n";
   Instruction* term = header->getTerminator();
   BranchInst* brInst = dyn_cast<BranchInst>(term);
 
@@ -5240,14 +5239,21 @@ void CWriter::printLoopNew(Loop *L) {
     }
 
     // print prologue
-    for (BasicBlock::iterator I = header->begin();
+    if(L->getBlocks().size() > 1){
+      for (BasicBlock::iterator I = header->begin();
          cast<Instruction>(I) !=  condInst && I != header->end();
          ++I)
         if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
           printInstruction(cast<Instruction>(I));
 
-    if(isa<CallInst>(condInst)){
-      printInstruction(condInst);
+      if(isa<CallInst>(condInst)){
+        printInstruction(condInst);
+      }
+    }
+    else{
+      BasicBlock *loopBB = L->getBlocks()[0];
+      for (BasicBlock::iterator I = loopBB->begin(); isa<PHINode>(I); ++I)
+        printInstruction(&*I);
     }
 
     if(!negateCondition) Out << "while (";
@@ -6962,12 +6968,27 @@ void CWriter::visitCallInst(CallInst &I) {
   if(Function *F = I.getCalledFunction()){
     if(F->getName() == "__kmpc_fork_call"){
       Out << "  #pragma omp parallel for\n" << "\n";
+
+
       ConstantExpr* utaskCast = dyn_cast<ConstantExpr>(I.getArgOperand(2));
       Function* utask;
       if(utask && utaskCast->isCast())
         utask = dyn_cast<Function>(utaskCast->getOperand(0));
       else
         utask = dyn_cast<Function>(I.getArgOperand(2));
+
+      // Create a Call to omp_outlined
+      Out << " omp_outlined(";
+
+      int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
+      bool printComma = false;
+      for(auto idx = 3; idx < 3+numArgs; ++idx) {
+        if (printComma)
+          Out << ", ";
+        Value *arg = I.getArgOperand(idx);
+        writeOperand(arg, ContextCasted);
+        printComma = true;
+      }
 
       ompFuncs.insert(utask);
       runOnFunction(*utask);
