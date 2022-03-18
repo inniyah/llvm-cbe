@@ -834,11 +834,7 @@ bool CWriter::runOnFunction(Function &F) {
   /*
    * OpenMP: skip translating omp runtime calls
    */
-  if(ompFuncs.find(&F) != ompFuncs.end()){
-    emitOmpFunction(F);
-  } else {
-    printFunction(F);
-  }
+   printFunction(F);
 
   LI = nullptr;
   PDT = nullptr;
@@ -4772,6 +4768,7 @@ void CWriter::insertDeclaredInsts(Instruction* I){
 }
 
 void CWriter::printFunction(Function &F) {
+  bool IS_OPENMP_FUNCTION = (ompFuncs.find(&F) != ompFuncs.end());
 
   //SUSAN: collect function argument reference depths
   for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
@@ -4809,9 +4806,23 @@ void CWriter::printFunction(Function &F) {
   }
 
   iterator_range<Function::arg_iterator> args = F.args();
-  printFunctionProto(Out, FTy,
+
+
+  /*
+   * OpenMP: remove first two args from outline
+   */
+  if(IS_OPENMP_FUNCTION)
+    printFunctionProto(Out, FTy,
+                     std::make_pair(F.getAttributes(), F.getCallingConv()),
+                     Name, &args, 2);
+  else
+    printFunctionProto(Out, FTy,
                      std::make_pair(F.getAttributes(), F.getCallingConv()),
                      Name, &args);
+  std::set<Value*> values2delete;
+  values2delete.insert(cast<Value>(F.getArg(0)));
+  values2delete.insert(cast<Value>(F.getArg(1)));
+  searchForUsesToDelete(values2delete, F);
 
   Out << " {\n";
 
@@ -6966,36 +6977,17 @@ bool CWriter::lowerIntrinsics(Function &F) {
   return LoweredAny;
 }
 
-void CWriter::emitOmpFunction(Function &F){
-  //SUSAN: collect function argument reference depths
-  for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
-    Type *argTy = arg->getType();
-    if(isa<ArrayType>(argTy) || isa<PointerType>(argTy) || isa<StructType>(argTy)){
-      findVariableDepth(argTy, cast<Value>(arg), 0);
+void CWriter::searchForUsesToDelete(std::set<Value*> values2delete, Function &F){
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    Instruction *inst = &*I;
+    for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i) {
+      Value *opnd = inst->getOperand(i);
+      if(values2delete.find(opnd) != values2delete.end()){
+        errs() << "SUSAN: don't print inst: " << *inst << "\n";
+        omp_SkipVals.insert(cast<Value>(inst));
+      }
     }
   }
-
-
-  /// isStructReturn - Should this function actually return a struct by-value?
-  bool isStructReturn = F.hasStructRetAttr();
-
-  cwriter_assert(!F.isDeclaration());
-  if (F.hasDLLImportStorageClass())
-    Out << "__declspec(dllimport) ";
-  if (F.hasDLLExportStorageClass())
-    Out << "__declspec(dllexport) ";
-  if (F.hasLocalLinkage())
-    Out << "static ";
-
-  std::string Name = GetValueName(&F);
-
-  FunctionType *FTy = F.getFunctionType();
-
-  //outlined function skips first two args
-  iterator_range<Function::arg_iterator> args = F.args();
-  printFunctionProto(Out, FTy,
-                     std::make_pair(F.getAttributes(), F.getCallingConv()),
-                     Name, &args, 2);
 }
 
 void CWriter::visitCallInst(CallInst &I) {
@@ -7029,7 +7021,8 @@ void CWriter::visitCallInst(CallInst &I) {
       }
 
       ompFuncs.insert(utask);
-      //runOnFunction(*utask);
+
+      Out << ")";
       return;
     }
   }

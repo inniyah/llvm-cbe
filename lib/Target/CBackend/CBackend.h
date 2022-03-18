@@ -104,6 +104,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
   std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
   std::set<Function*> ompFuncs;
+  std::set<Value*> omp_SkipVals;
 
 
   CBERegion topRegion;
@@ -341,6 +342,7 @@ private:
   bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
   void markPHIs2Print(Function &F);
   void emitOmpFunction(Function &F);
+  void searchForUsesToDelete(std::set<Value*> values2delete, Function &F);
 
 
   void writeOperandDeref(Value *Operand);
