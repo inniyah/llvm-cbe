@@ -802,13 +802,6 @@ bool CWriter::runOnFunction(Function &F) {
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
 
-  /*
-   * OpenMP: skip translating omp runtime calls
-   */
-  if(ompFuncs.find(&F) != ompFuncs.end()){
-    //emitOmpRegion(&F);
-    return false;
-  }
 
   //RI->dump();
   // Get rid of intrinsics we can't handle.
@@ -838,7 +831,14 @@ bool CWriter::runOnFunction(Function &F) {
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
 
-  printFunction(F);
+  /*
+   * OpenMP: skip translating omp runtime calls
+   */
+  if(ompFuncs.find(&F) != ompFuncs.end()){
+    emitOmpFunction(F);
+  } else {
+    printFunction(F);
+  }
 
   LI = nullptr;
   PDT = nullptr;
@@ -1392,7 +1392,7 @@ raw_ostream &
 CWriter::printFunctionProto(raw_ostream &Out, FunctionType *FTy,
                             std::pair<AttributeList, CallingConv::ID> Attrs,
                             const std::string &Name,
-                            iterator_range<Function::arg_iterator> *ArgList) {
+                            iterator_range<Function::arg_iterator> *ArgList, int skipArgSteps) {
   bool shouldFixMain = (Name == "main" && isStandardMain(FTy));
 
   AttributeList &PAL = Attrs.first;
@@ -1460,6 +1460,16 @@ CWriter::printFunctionProto(raw_ostream &Out, FunctionType *FTy,
     ++I;
     ++Idx;
     if (ArgList)
+      ++ArgName;
+  }
+
+  /*
+   * OpenMP: if it's an omp function call, skip some args if not needed
+   */
+  for(int i=0; i<skipArgSteps; i++){
+    ++I;
+    ++Idx;
+    if(ArgList)
       ++ArgName;
   }
 
@@ -5907,6 +5917,11 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     return;
   }
 
+  //might be a loop exit cond
+  if(std::count(ifBranches.begin(), ifBranches.end(), &I))
+    return;
+
+
   CBERegion *cbeRegion = CBERegionMap[I.getParent()];
 
   BasicBlock *exitingBB = I.getParent();
@@ -6951,12 +6966,36 @@ bool CWriter::lowerIntrinsics(Function &F) {
   return LoweredAny;
 }
 
-void CWriter::emitOmpRegion(Function *F){
-  for(auto &BB : *F){
-    Loop *L = LI->getLoopFor(&BB);
-    if(L)
-      errs() << "SUSAN: found omp loop!!!" << *L << "\n";
+void CWriter::emitOmpFunction(Function &F){
+  //SUSAN: collect function argument reference depths
+  for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
+    Type *argTy = arg->getType();
+    if(isa<ArrayType>(argTy) || isa<PointerType>(argTy) || isa<StructType>(argTy)){
+      findVariableDepth(argTy, cast<Value>(arg), 0);
+    }
   }
+
+
+  /// isStructReturn - Should this function actually return a struct by-value?
+  bool isStructReturn = F.hasStructRetAttr();
+
+  cwriter_assert(!F.isDeclaration());
+  if (F.hasDLLImportStorageClass())
+    Out << "__declspec(dllimport) ";
+  if (F.hasDLLExportStorageClass())
+    Out << "__declspec(dllexport) ";
+  if (F.hasLocalLinkage())
+    Out << "static ";
+
+  std::string Name = GetValueName(&F);
+
+  FunctionType *FTy = F.getFunctionType();
+
+  //outlined function skips first two args
+  iterator_range<Function::arg_iterator> args = F.args();
+  printFunctionProto(Out, FTy,
+                     std::make_pair(F.getAttributes(), F.getCallingConv()),
+                     Name, &args, 2);
 }
 
 void CWriter::visitCallInst(CallInst &I) {
@@ -6967,8 +7006,7 @@ void CWriter::visitCallInst(CallInst &I) {
    */
   if(Function *F = I.getCalledFunction()){
     if(F->getName() == "__kmpc_fork_call"){
-      Out << "  #pragma omp parallel for\n" << "\n";
-
+      Out << "  #pragma omp parallel \n" << "\n";
 
       ConstantExpr* utaskCast = dyn_cast<ConstantExpr>(I.getArgOperand(2));
       Function* utask;
@@ -6978,7 +7016,7 @@ void CWriter::visitCallInst(CallInst &I) {
         utask = dyn_cast<Function>(I.getArgOperand(2));
 
       // Create a Call to omp_outlined
-      Out << " omp_outlined(";
+      Out << GetValueName(utask) << "(";
 
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
       bool printComma = false;
@@ -6991,7 +7029,7 @@ void CWriter::visitCallInst(CallInst &I) {
       }
 
       ompFuncs.insert(utask);
-      runOnFunction(*utask);
+      //runOnFunction(*utask);
       return;
     }
   }

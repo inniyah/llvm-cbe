@@ -259,7 +259,7 @@ private:
   printFunctionProto(raw_ostream &Out, FunctionType *Ty,
                      std::pair<AttributeList, CallingConv::ID> Attrs,
                      const std::string &Name,
-                     iterator_range<Function::arg_iterator> *ArgList);
+                     iterator_range<Function::arg_iterator> *ArgList, int skipArgSteps = 0);
   raw_ostream &printFunctionProto(raw_ostream &Out, Function *F) {
     return printFunctionProto(
         Out, F->getFunctionType(),
@@ -340,7 +340,7 @@ private:
   void insertDeclaredInsts(Instruction* I);
   bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
   void markPHIs2Print(Function &F);
-  void emitOmpRegion(Function *F);
+  void emitOmpFunction(Function &F);
 
 
   void writeOperandDeref(Value *Operand);
