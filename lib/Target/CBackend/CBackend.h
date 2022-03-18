@@ -105,6 +105,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
   std::set<Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
+  bool IS_OPENMP_FUNCTION;
 
 
   CBERegion topRegion;
@@ -261,11 +262,11 @@ private:
                      std::pair<AttributeList, CallingConv::ID> Attrs,
                      const std::string &Name,
                      iterator_range<Function::arg_iterator> *ArgList, int skipArgSteps = 0);
-  raw_ostream &printFunctionProto(raw_ostream &Out, Function *F) {
+  raw_ostream &printFunctionProto(raw_ostream &Out, Function *F, int skipArgSteps = 0) {
     return printFunctionProto(
         Out, F->getFunctionType(),
         std::make_pair(F->getAttributes(), F->getCallingConv()),
-        GetValueName(F), nullptr);
+        GetValueName(F), nullptr, skipArgSteps);
   }
 
   raw_ostream &

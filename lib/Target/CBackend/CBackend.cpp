@@ -790,6 +790,10 @@ void CWriter::markPHIs2Print(Function &F){
 
 bool CWriter::runOnFunction(Function &F) {
 
+  if(ompFuncs.find(&F) != ompFuncs.end())
+    IS_OPENMP_FUNCTION = true;
+  else
+    IS_OPENMP_FUNCTION = false;
 
   // Do not codegen any 'available_externally' functions at all, they have
   // definitions outside the translation unit.
@@ -3267,7 +3271,16 @@ void CWriter::generateHeader(Module &M) {
       Out << "static ";
     if (I->hasExternalWeakLinkage())
       Out << "extern ";
-    printFunctionProto(Out, &*I);
+
+    /*
+     * OpenMP: FIXME: shouldn't based on .omp name
+     */
+    if((&*I)->getName().contains(".omp"))
+      printFunctionProto(Out, &*I, 2);
+    else
+      printFunctionProto(Out, &*I);
+
+
     printFunctionAttributes(Out, I->getAttributes());
     if (I->hasWeakLinkage() || I->hasLinkOnceLinkage()) {
       headerUseAttributeWeak();
@@ -4768,7 +4781,6 @@ void CWriter::insertDeclaredInsts(Instruction* I){
 }
 
 void CWriter::printFunction(Function &F) {
-  bool IS_OPENMP_FUNCTION = (ompFuncs.find(&F) != ompFuncs.end());
 
   //SUSAN: collect function argument reference depths
   for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
@@ -4819,10 +4831,13 @@ void CWriter::printFunction(Function &F) {
     printFunctionProto(Out, FTy,
                      std::make_pair(F.getAttributes(), F.getCallingConv()),
                      Name, &args);
-  std::set<Value*> values2delete;
-  values2delete.insert(cast<Value>(F.getArg(0)));
-  values2delete.insert(cast<Value>(F.getArg(1)));
-  searchForUsesToDelete(values2delete, F);
+
+  if(IS_OPENMP_FUNCTION){
+    std::set<Value*> values2delete;
+    values2delete.insert(cast<Value>(F.getArg(0)));
+    values2delete.insert(cast<Value>(F.getArg(1)));
+    searchForUsesToDelete(values2delete, F);
+  }
 
   Out << " {\n";
 
@@ -7008,7 +7023,7 @@ void CWriter::visitCallInst(CallInst &I) {
         utask = dyn_cast<Function>(I.getArgOperand(2));
 
       // Create a Call to omp_outlined
-      Out << GetValueName(utask) << "(";
+      Out << "  " << GetValueName(utask) << "(";
 
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
       bool printComma = false;
