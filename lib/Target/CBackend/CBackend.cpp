@@ -2298,12 +2298,28 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
     printConstant(CPV, ContextCasted);
 }
 
+std::string demangleVariableName(StringRef var){
+  SmallVector<StringRef, 16> splitedStrs;
+  if(!var.contains(".")) return var;
+
+  var.split(splitedStrs, ".");
+
+  std::string newVar = "";
+  for(auto str : splitedStrs){
+    if(str.empty()) continue;
+    newVar += "_";
+    newVar += str;
+  }
+  return newVar;
+}
 std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: where the vairable names are printed
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for(auto inst2var : IRNaming)
-    if(inst2var.first == operandInst)
-      return inst2var.second;
+    if(inst2var.first == operandInst){
+      std::string var = demangleVariableName(inst2var.second);
+      return var;
+    }
   //for (auto const& [var, insts] : Var2IRs)
     //for (auto &inst : insts)
       //if(inst == operandInst) return var;
