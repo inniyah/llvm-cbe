@@ -6031,7 +6031,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   }
 
   //might be a loop exit cond
-  if(std::count(ifBranches.begin(), ifBranches.end(), &I))
+  if(!std::count(ifBranches.begin(), ifBranches.end(), &I))
     return;
 
 
