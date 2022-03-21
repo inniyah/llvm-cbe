@@ -5238,6 +5238,7 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
 }
 
 void CWriter::printInstruction(Instruction *I){
+    if(omp_SkipVals.find(I) != omp_SkipVals.end()) return;
     Out << "  ";
     if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
       if (canDeclareLocalLate(*I)) {
@@ -5427,6 +5428,8 @@ if( NATURAL_CONTROL_FLOW ){
 
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
+    Instruction* inst = &*II;
+    if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
