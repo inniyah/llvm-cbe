@@ -776,6 +776,33 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
 
 }
 
+//Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
+//  Instruction *boundI = dyn_cast<Instruction>(bound);
+//  if(!boundI) return nullptr;
+//
+//  std::queue<Instruction*> toVisit;
+//  std::set<Instruction*> visited;
+//  toVisit.push(boundI);
+//  visited.insert(boundI);
+//  while(!toVisit.empty()){
+//    Instruction *currInst = toVisit.front();
+//    toVisit.pop();
+//
+//    if(isa<CmpInst>(currInst))
+//      return LI->getLoopFor(currInst->getParent());
+//
+//    for(Use &U : currInst->operands()){
+//      if(Instruction *inst = dyn_cast<Instruction>(U.get())){
+//        if(visited.find(inst) == visited.end()){
+//          visited.insert(inst);
+//          toVisit.push(inst);
+//        }
+//      }
+//    }
+//  }
+//
+//}
+
 void CWriter::markPHIs2Print(Function &F){
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
@@ -786,6 +813,52 @@ void CWriter::markPHIs2Print(Function &F){
       PHIValues2Print.insert(std::make_pair(predBB, phi));
     }
   }
+}
+
+Value* findOriginalUb(Function &F, Value *ub){
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
+    if(CallInst* CI = dyn_cast<CallInst>(&*I))
+      if(Function *ompInitCall = CI->getCalledFunction())
+        if(ompInitCall->getName().contains("__kmpc_for_static_init"))
+          break;
+
+    if(StoreInst *store = dyn_cast<StoreInst>(&*I))
+      if(store->getOperand(1) == ub)
+        return store->getOperand(0);
+  }
+  return ub;
+}
+
+void CWriter::omp_preprossesing(Function &F){
+
+  //delete all the uses of first and second args of the function
+  std::set<Value*> values2delete;
+  values2delete.insert(cast<Value>(F.getArg(0)));
+  values2delete.insert(cast<Value>(F.getArg(1)));
+
+  //find __kmpc_for_static_init and associated loop info
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
+    if(CallInst* CI = dyn_cast<CallInst>(&*I)){
+      if(Function *ompInitCall = CI->getCalledFunction()){
+        if(ompInitCall->getName().contains("__kmpc_for_static_init")){
+          errs() << "call: " << *ompInitCall << "\n";
+          omp_SkipVals.insert(cast<Value>(CI));
+          Value *lb = CI->getArgOperand(4);
+          Value *ub = CI->getArgOperand(5);
+          Value *originalUb = findOriginalUb(F,ub);
+          errs() << "SUSAN: original upperbound: " << *originalUb << "\n";
+          Value *incr = CI->getArgOperand(7);
+        }
+      }
+    }
+  }
+
+  //find loop associated with the lower & upper bounds
+  //Loop L_lb = findLoopAccordingTo(F, lb);
+
+
+
+  omp_searchForUsesToDelete(values2delete, F);
 }
 
 bool CWriter::runOnFunction(Function &F) {
@@ -836,8 +909,10 @@ bool CWriter::runOnFunction(Function &F) {
   printFloatingPointConstants(F);
 
   /*
-   * OpenMP: skip translating omp runtime calls
+   * OpenMP: preprosessings
    */
+   if(IS_OPENMP_FUNCTION)
+    omp_preprossesing(F);
    printFunction(F);
 
   LI = nullptr;
@@ -4848,13 +4923,6 @@ void CWriter::printFunction(Function &F) {
                      std::make_pair(F.getAttributes(), F.getCallingConv()),
                      Name, &args);
 
-  if(IS_OPENMP_FUNCTION){
-    std::set<Value*> values2delete;
-    values2delete.insert(cast<Value>(F.getArg(0)));
-    values2delete.insert(cast<Value>(F.getArg(1)));
-    searchForUsesToDelete(values2delete, F);
-  }
-
   Out << " {\n";
 
   if (shouldFixMain) {
@@ -7011,7 +7079,7 @@ bool CWriter::lowerIntrinsics(Function &F) {
   return LoweredAny;
 }
 
-void CWriter::searchForUsesToDelete(std::set<Value*> values2delete, Function &F){
+void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function &F){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction *inst = &*I;
     for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i) {

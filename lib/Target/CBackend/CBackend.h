@@ -343,7 +343,9 @@ private:
   bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
   void markPHIs2Print(Function &F);
   void emitOmpFunction(Function &F);
-  void searchForUsesToDelete(std::set<Value*> values2delete, Function &F);
+  void omp_searchForUsesToDelete(std::set<Value*> values2delete, Function &F);
+  void omp_preprossesing(Function &F);
+  void findLoopAccordingTo(Function &F, Value *bound);
 
 
   void writeOperandDeref(Value *Operand);
