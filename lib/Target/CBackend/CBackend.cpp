@@ -35,6 +35,7 @@
 #include <queue>
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Analysis/CFG.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
 // Jackson Korba 9/29/14
 #ifndef DEBUG_TYPE
@@ -776,32 +777,45 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
 
 }
 
-//Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
-//  Instruction *boundI = dyn_cast<Instruction>(bound);
-//  if(!boundI) return nullptr;
-//
-//  std::queue<Instruction*> toVisit;
-//  std::set<Instruction*> visited;
-//  toVisit.push(boundI);
-//  visited.insert(boundI);
-//  while(!toVisit.empty()){
-//    Instruction *currInst = toVisit.front();
-//    toVisit.pop();
-//
-//    if(isa<CmpInst>(currInst))
-//      return LI->getLoopFor(currInst->getParent());
-//
-//    for(Use &U : currInst->operands()){
-//      if(Instruction *inst = dyn_cast<Instruction>(U.get())){
-//        if(visited.find(inst) == visited.end()){
-//          visited.insert(inst);
-//          toVisit.push(inst);
-//        }
-//      }
-//    }
-//  }
-//
-//}
+void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
+  ompLoopInfo *ompLI = new ompLoopInfo();
+  ompLI->L = L;
+  ompLI->ub = ub;
+  ompLI->lb = lb;
+  ompLI->incr = incr;
+  ompLoops.insert(ompLI);
+}
+Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
+  Instruction *boundI = dyn_cast<Instruction>(bound);
+  if(!boundI){
+    return nullptr;
+  }
+
+  std::queue<Instruction*> toVisit;
+  std::set<Instruction*> visited;
+  toVisit.push(boundI);
+  visited.insert(boundI);
+  while(!toVisit.empty()){
+    Instruction *currInst = toVisit.front();
+    toVisit.pop();
+
+    if(isa<CmpInst>(currInst)){
+      Loop *L = LI->getLoopFor(currInst->getParent());
+      if(L) return L;
+    }
+
+    for(User *U : currInst->users()){
+      if(Instruction *inst = dyn_cast<Instruction>(U)){
+        if(visited.find(inst) == visited.end()){
+          visited.insert(inst);
+          toVisit.push(inst);
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
 
 void CWriter::markPHIs2Print(Function &F){
 
@@ -815,6 +829,33 @@ void CWriter::markPHIs2Print(Function &F){
   }
 }
 
+PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
+  PHINode *InnerIndexVar = L->getCanonicalInductionVariable();
+  if (InnerIndexVar)
+    return InnerIndexVar;
+  if (L->getLoopLatch() == nullptr || L->getLoopPredecessor() == nullptr)
+    return nullptr;
+  for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
+    PHINode *PhiVar = cast<PHINode>(I);
+    Type *PhiTy = PhiVar->getType();
+    if (!PhiTy->isIntegerTy() && !PhiTy->isFloatingPointTy() &&
+        !PhiTy->isPointerTy())
+      return nullptr;
+    const SCEVAddRecExpr *AddRec =
+        dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
+    if (!AddRec || !AddRec->isAffine())
+      continue;
+    const SCEV *Step = AddRec->getStepRecurrence(*SE);
+    if (!isa<SCEVConstant>(Step))
+      continue;
+    // Found the induction variable.
+    // FIXME: Handle loops with more than one induction variable. Note that,
+    // currently, legality makes sure we have only one induction variable.
+    return PhiVar;
+  }
+  return nullptr;
+}
+
 Value* findOriginalUb(Function &F, Value *ub){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I))
@@ -823,8 +864,15 @@ Value* findOriginalUb(Function &F, Value *ub){
           break;
 
     if(StoreInst *store = dyn_cast<StoreInst>(&*I))
-      if(store->getOperand(1) == ub)
-        return store->getOperand(0);
+      if(store->getOperand(1) == ub){
+        BinaryOperator *subInst = dyn_cast<BinaryOperator>(store->getOperand(0));
+        if(subInst->getOpcode() == Instruction::Add || subInst->getOpcode() == Instruction::FAdd){
+          if(ConstantInt *minusOne = dyn_cast<ConstantInt>(subInst->getOperand(1)))
+            if(minusOne->getSExtValue() == -1){
+              return subInst->getOperand(0);
+            }
+        }
+      }
   }
   return ub;
 }
@@ -837,25 +885,26 @@ void CWriter::omp_preprossesing(Function &F){
   values2delete.insert(cast<Value>(F.getArg(1)));
 
   //find __kmpc_for_static_init and associated loop info
+  Value *lb, *ub, *incr;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *ompInitCall = CI->getCalledFunction()){
         if(ompInitCall->getName().contains("__kmpc_for_static_init")){
           errs() << "call: " << *ompInitCall << "\n";
           omp_SkipVals.insert(cast<Value>(CI));
-          Value *lb = CI->getArgOperand(4);
-          Value *ub = CI->getArgOperand(5);
-          Value *originalUb = findOriginalUb(F,ub);
-          errs() << "SUSAN: original upperbound: " << *originalUb << "\n";
-          Value *incr = CI->getArgOperand(7);
+          lb = CI->getArgOperand(4);
+          ub = findOriginalUb(F, CI->getArgOperand(5));
+          incr = CI->getArgOperand(7);
         }
       }
     }
   }
 
   //find loop associated with the lower & upper bounds
-  //Loop L_lb = findLoopAccordingTo(F, lb);
-
+  if(lb){
+    Loop *L_lb = findLoopAccordingTo(F, lb);
+    CreateOmpLoops(L_lb, ub, lb, incr);
+  }
 
 
   omp_searchForUsesToDelete(values2delete, F);
@@ -878,6 +927,7 @@ bool CWriter::runOnFunction(Function &F) {
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
+  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
 
 
   //RI->dump();
@@ -5322,6 +5372,15 @@ void CWriter::printInstruction(Instruction *I){
 
 void CWriter::printLoopNew(Loop *L) {
 
+  //characterize the loop
+  ompLoopInfo* ompLoop = nullptr;
+  for(auto ompLI : ompLoops){
+    if(ompLI->L == L)
+      ompLoop = ompLI;
+  }
+  PHINode *IV = getInductionVariable(L, SE);
+  errs() << "SUSAN: found induction variable: " << *IV << "\n";
+
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
@@ -5338,7 +5397,6 @@ void CWriter::printLoopNew(Loop *L) {
   Instruction *condInst = headerIsExiting(L, negateCondition, brInst);
   // print compare statement
   if(condInst){
-    errs() << "SUSAN: condInst: " << *condInst << "\n";
   //  assert(brInst && brInst->isConditional() &&
   //    "exit condition is not a conditional branch inst?");
     //search for exit loop condition
@@ -5385,7 +5443,19 @@ void CWriter::printLoopNew(Loop *L) {
 
     //writeOperandWithCast(icmp->getOperand(1), *icmp);
 
-    writeOperand(condInst);
+    if(ompLoop){
+     /*
+      * OpenMP: FIXME: for right now assume operand 1 is ub
+      */
+      ICmpInst *cmp = dyn_cast<ICmpInst>(condInst);
+      assert(cmp && "SUSAN: omp currently only translates ICmpInst condition!\n");
+      writeOperand(condInst->getOperand(0));
+      printCmpOperator(cmp);
+      errs() << "SUSAN: omp upperbound: " << *(ompLoop->ub) << "\n";
+      writeOperand(ompLoop->ub);
+    } else {
+      writeOperand(condInst);
+    }
 
     //delete(icmp);
 

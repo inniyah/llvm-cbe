@@ -44,6 +44,7 @@
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/RegionInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 
 namespace llvm_cbe {
 
@@ -60,6 +61,13 @@ typedef struct CBERegion{
   std::vector<std::pair<BasicBlock*, BasicBlock*>> thenEdges;
   std::vector<std::pair<BasicBlock*, BasicBlock*>> elseEdges;
 } CBERegion;
+
+typedef struct ompLoopInfo{
+  Loop *L;
+  Value *ub;
+  Value *lb;
+  Value *incr;
+} ompLoopInfo;
 
 class CBEMCAsmInfo : public MCAsmInfo {
 public:
@@ -106,6 +114,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
+  std::set<ompLoopInfo*> ompLoops;
 
 
   CBERegion topRegion;
@@ -114,6 +123,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   PostDominatorTree *PDT = nullptr;
   DominatorTree *DT = nullptr;
   RegionInfo *RI = nullptr;
+  ScalarEvolution *SE = nullptr;
 
   std::string _Out;
   std::string _OutHeaders;
@@ -240,6 +250,7 @@ public:
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<RegionInfoPass>();
+    AU.addRequired<ScalarEvolutionWrapperPass>();
     AU.setPreservesCFG();
   }
 
@@ -345,7 +356,8 @@ private:
   void emitOmpFunction(Function &F);
   void omp_searchForUsesToDelete(std::set<Value*> values2delete, Function &F);
   void omp_preprossesing(Function &F);
-  void findLoopAccordingTo(Function &F, Value *bound);
+  Loop* findLoopAccordingTo(Function &F, Value *bound);
+  void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
 
 
   void writeOperandDeref(Value *Operand);
