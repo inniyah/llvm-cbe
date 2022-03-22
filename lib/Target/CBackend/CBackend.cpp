@@ -777,12 +777,41 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
 
 }
 
+PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
+  PHINode *InnerIndexVar = L->getCanonicalInductionVariable();
+  if (InnerIndexVar)
+    return InnerIndexVar;
+  if (L->getLoopLatch() == nullptr || L->getLoopPredecessor() == nullptr)
+    return nullptr;
+  for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
+    PHINode *PhiVar = cast<PHINode>(I);
+    Type *PhiTy = PhiVar->getType();
+    if (!PhiTy->isIntegerTy() && !PhiTy->isFloatingPointTy() &&
+        !PhiTy->isPointerTy())
+      return nullptr;
+    const SCEVAddRecExpr *AddRec =
+        dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
+    if (!AddRec || !AddRec->isAffine())
+      continue;
+    const SCEV *Step = AddRec->getStepRecurrence(*SE);
+    if (!isa<SCEVConstant>(Step))
+      continue;
+    // Found the induction variable.
+    // FIXME: Handle loops with more than one induction variable. Note that,
+    // currently, legality makes sure we have only one induction variable.
+    return PhiVar;
+  }
+  return nullptr;
+}
+
 void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
-  ompLoopInfo *ompLI = new ompLoopInfo();
+  ForLoopProfile *ompLI = new ForLoopProfile();
   ompLI->L = L;
   ompLI->ub = ub;
   ompLI->lb = lb;
   ompLI->incr = incr;
+  ompLI->IV = getInductionVariable(L, SE);
+  assert(ompLI->IV && "SUSAN: only translate for loop for omp right now\n");
   ompLoops.insert(ompLI);
 }
 Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
@@ -829,32 +858,7 @@ void CWriter::markPHIs2Print(Function &F){
   }
 }
 
-PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
-  PHINode *InnerIndexVar = L->getCanonicalInductionVariable();
-  if (InnerIndexVar)
-    return InnerIndexVar;
-  if (L->getLoopLatch() == nullptr || L->getLoopPredecessor() == nullptr)
-    return nullptr;
-  for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
-    PHINode *PhiVar = cast<PHINode>(I);
-    Type *PhiTy = PhiVar->getType();
-    if (!PhiTy->isIntegerTy() && !PhiTy->isFloatingPointTy() &&
-        !PhiTy->isPointerTy())
-      return nullptr;
-    const SCEVAddRecExpr *AddRec =
-        dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
-    if (!AddRec || !AddRec->isAffine())
-      continue;
-    const SCEV *Step = AddRec->getStepRecurrence(*SE);
-    if (!isa<SCEVConstant>(Step))
-      continue;
-    // Found the induction variable.
-    // FIXME: Handle loops with more than one induction variable. Note that,
-    // currently, legality makes sure we have only one induction variable.
-    return PhiVar;
-  }
-  return nullptr;
-}
+
 
 Value* findOriginalUb(Function &F, Value *ub){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
@@ -1380,6 +1384,16 @@ raw_ostream &CWriter::printStructDeclaration(raw_ostream &Out,
   if (STy->isPacked())
     Out << "#ifdef _MSC_VER\n#pragma pack(pop)\n#endif\n";
   return Out;
+}
+
+bool CWriter::isInductionVariable(Value* V){
+  PHINode *phi = dyn_cast<PHINode>(V);
+  if(!phi) return false;
+
+  Loop* L = LI->getLoopFor(phi->getParent());
+  if(L && getInductionVariable(L, SE) == phi) return true;
+
+  return false;
 }
 
 raw_ostream &CWriter::printFunctionAttributes(raw_ostream &Out,
@@ -5047,6 +5061,11 @@ void CWriter::printFunction(Function &F) {
     }
   }
 
+  errs() << "=========================SUSAN: IR NAMING BEFORE=====================\n";
+  for(auto inst2var : IRNaming){
+    errs() << *inst2var.first << " -> " << inst2var.second << "\n";
+  }
+
   std::set<StringRef> vars2record;
   for(auto inst2var : IRNaming){
     vars2record.insert(inst2var.second);
@@ -5167,12 +5186,21 @@ void CWriter::printFunction(Function &F) {
             auto var = inst2var.second;
             if(MRVar2Vals.find(var) != MRVar2Vals.end()
                 && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
-                errs() << "deleting operand: " << *operand << "\n";
-                errs() << "deleting corresponding var val: " << *MRVar2Vals[var] << "\n";
-                for(auto pair : IRNaming)
-                  if( (pair.first == operand && pair.second == var)
-                      || (pair.first == MRVar2Vals[var] && pair.second == var) )
-                    instVarPair2Delete.push_back(pair);
+                //Note: if it's IV, we know how to handle it and doesn't need to be deleted
+                if(!isInductionVariable(operand)){
+                  for(auto pair : IRNaming)
+                    if(pair.first == operand && pair.second == var)
+                      instVarPair2Delete.push_back(pair);
+                  errs() << "deleting operand: " << *operand << "\n";
+                }
+
+                if(!isInductionVariable(MRVar2Vals[var])){
+                  for(auto pair : IRNaming)
+                    if(pair.first == MRVar2Vals[var] && pair.second == var)
+                      instVarPair2Delete.push_back(pair);
+                  errs() << "deleting operand: " << *MRVar2Vals[var] << "\n";
+                }
+
             }
           }
   }
@@ -5355,7 +5383,7 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
     }
 }
 
-void CWriter::printInstruction(Instruction *I){
+void CWriter::printInstruction(Instruction *I, bool printSemiColon){
     if(omp_SkipVals.find(I) != omp_SkipVals.end()) return;
     Out << "  ";
     if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
@@ -5365,22 +5393,13 @@ void CWriter::printInstruction(Instruction *I){
       Out << GetValueName(&*I) << " = ";
     }
     writeInstComputationInline(*I);
-    Out << ";\n";
+
+    if(printSemiColon)
+      Out << ";\n";
 }
 
 
-
-void CWriter::printLoopNew(Loop *L) {
-
-  //characterize the loop
-  ompLoopInfo* ompLoop = nullptr;
-  for(auto ompLI : ompLoops){
-    if(ompLI->L == L)
-      ompLoop = ompLI;
-  }
-  PHINode *IV = getInductionVariable(L, SE);
-  errs() << "SUSAN: found induction variable: " << *IV << "\n";
-
+Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
@@ -5393,8 +5412,95 @@ void CWriter::printLoopNew(Loop *L) {
   BranchInst* brInst = dyn_cast<BranchInst>(term);
 
 
+  return headerIsExiting(L, negateCondition, brInst);
+}
+
+ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
+  for(auto ompLI : ompLoops){
+    if(ompLI->L == L)
+      return ompLI;
+  }
+
+  PHINode *IV = getInductionVariable(L, SE);
+  if(!IV) return nullptr;
+
+  ForLoopProfile* LP = new ForLoopProfile();
+  LP->IV = IV;
+
+  if(LI->getLoopFor(IV->getIncomingBlock(0)) != L)
+    LP->lb = IV->getIncomingValue(0);
+  else if((LI->getLoopFor(IV->getIncomingBlock(0)) == L))
+    LP->incr = IV->getIncomingValue(0);
+
+  if(LI->getLoopFor(IV->getIncomingBlock(1)) != L)
+    LP->lb = IV->getIncomingValue(1);
+  else if((LI->getLoopFor(IV->getIncomingBlock(1)) == L))
+    LP->incr = IV->getIncomingValue(1);
+
+  LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
+
+  return LP;
+}
+
+void CWriter::printLoopBody(Loop *L){
+  // print loop body
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    Loop *BBLoop = LI->getLoopFor(BB);
+
+    // Don't print Loop header any more
+    if(BB != L->getHeader()){
+      if (BBLoop == L){
+        printBasicBlock(BB);
+        times2bePrinted[BB]--;
+      }
+      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+        if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
+        else printLoop(BBLoop);
+      }
+    }
+  }
+}
+
+void CWriter::printLoopNew(Loop *L) {
+  // FIXME: assume all omp loops are for loops
+
+  BasicBlock *header = L->getHeader();
   bool negateCondition = false;
-  Instruction *condInst = headerIsExiting(L, negateCondition, brInst);
+  Instruction *condInst = findCondInst(L, negateCondition);
+
+  //translate as a for loop
+  ForLoopProfile *LP = findForLoopProfile(L);
+  if(LP){
+    Out << "for(";
+    Value *initVal, *ub, *incr;
+    errs() << "SUSAN: found for loop profile:\n";
+    errs() << "lb: " << *LP->lb << "\n";
+    if(LP->ub)
+      errs() << "ub: " << *LP->ub << "\n";
+    errs() << "incr: " << *LP->incr << "\n";
+
+    //print init statement
+    Out << GetValueName(LP->IV) << " = ";
+    writeOperandInternal(LP->lb);
+    Out << ";";
+
+    //print exitCondtion
+    writeOperand(condInst);
+    Out << ";";
+
+    //print step
+    printInstruction(cast<Instruction>(LP->incr), false);
+    Out << "){\n";
+
+    printLoopBody(L);
+
+    Out << "}\n";
+
+    return;
+  }
+
+
   // print compare statement
   if(condInst){
   //  assert(brInst && brInst->isConditional() &&
@@ -5437,27 +5543,8 @@ void CWriter::printLoopNew(Loop *L) {
 
     if(!negateCondition) Out << "while (";
     else Out << "while(!(";
-    //writeOperandWithCast(icmp->getOperand(0), *icmp);
 
-    //printCmpOperator(icmp);
-
-    //writeOperandWithCast(icmp->getOperand(1), *icmp);
-
-    if(ompLoop){
-     /*
-      * OpenMP: FIXME: for right now assume operand 1 is ub
-      */
-      ICmpInst *cmp = dyn_cast<ICmpInst>(condInst);
-      assert(cmp && "SUSAN: omp currently only translates ICmpInst condition!\n");
-      writeOperand(condInst->getOperand(0));
-      printCmpOperator(cmp);
-      errs() << "SUSAN: omp upperbound: " << *(ompLoop->ub) << "\n";
-      writeOperand(ompLoop->ub);
-    } else {
-      writeOperand(condInst);
-    }
-
-    //delete(icmp);
+    writeOperand(condInst);
 
     if(!negateCondition) Out << "){\n";
     else Out << ")){\n}";

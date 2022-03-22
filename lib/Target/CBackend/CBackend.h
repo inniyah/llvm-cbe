@@ -62,12 +62,13 @@ typedef struct CBERegion{
   std::vector<std::pair<BasicBlock*, BasicBlock*>> elseEdges;
 } CBERegion;
 
-typedef struct ompLoopInfo{
+typedef struct ForLoopProfile{
   Loop *L;
   Value *ub;
   Value *lb;
   Value *incr;
-} ompLoopInfo;
+  PHINode *IV;
+} ForLoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
 public:
@@ -114,7 +115,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
-  std::set<ompLoopInfo*> ompLoops;
+  std::set<ForLoopProfile*> ompLoops;
 
 
   CBERegion topRegion;
@@ -325,7 +326,7 @@ private:
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
   void markGotoBranches(Function &F);
   void printCmpOperator(ICmpInst *icmp);
-  void printInstruction(Instruction *I);
+  void printInstruction(Instruction *I, bool printSemiColon = true);
   void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
   void emitSwitchBlock(BasicBlock* start, BasicBlock *brBlockk);
   bool GEPAccessesMemory(GetElementPtrInst *I);
@@ -358,6 +359,10 @@ private:
   void omp_preprossesing(Function &F);
   Loop* findLoopAccordingTo(Function &F, Value *bound);
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
+  Instruction* findCondInst(Loop *L, bool &negateCondition);
+  ForLoopProfile* findForLoopProfile(Loop *L);
+  void printLoopBody(Loop *L);
+  bool isInductionVariable(Value* V);
 
 
   void writeOperandDeref(Value *Operand);
