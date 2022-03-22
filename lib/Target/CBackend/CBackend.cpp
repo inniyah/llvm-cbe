@@ -2526,13 +2526,13 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
   // a 1 bit value.  This is important because we want "add i1 x, y" to return
   // "0" when x and y are true, not "2" for example.
   // Also truncate odd bit sizes
-  if (mask)
-    Out << "((";
+  //if (mask)
+    //Out << "((";
 
   visit(&I);
 
-  if (mask)
-    Out << ")&" << mask << ")";
+  //if (mask)
+    //Out << ")&" << mask << ")";
 }
 
 void CWriter::writeOperandInternal(Value *Operand,
@@ -2540,9 +2540,9 @@ void CWriter::writeOperandInternal(Value *Operand,
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
-      Out << '(';
+      //Out << '(';
       writeInstComputationInline(*I, startExpression);
-      Out << ')';
+      //Out << ')';
       return;
     }
 
@@ -5483,7 +5483,7 @@ void CWriter::printLoopNew(Loop *L) {
     //print init statement
     Out << GetValueName(LP->IV) << " = ";
     writeOperandInternal(LP->lb);
-    Out << ";";
+    Out << "; ";
 
     //print exitCondtion
     writeOperand(condInst);
