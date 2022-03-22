@@ -5679,7 +5679,10 @@ if( NATURAL_CONTROL_FLOW ){
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
     Instruction* inst = &*II;
+
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
+    if(isa<PHINode>(inst)) continue;
+
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
@@ -5951,16 +5954,13 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
                                          unsigned Indent) {
   for (BasicBlock::iterator I = Successor->begin(); isa<PHINode>(I); ++I) {
     PHINode *PN = cast<PHINode>(I);
-    // Now we have to do the printing.
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
     if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType()) && !alreadyPrintedPHIVal(CurBlock, PN)) {
       printedPHIValues.insert(std::make_pair(CurBlock, PN));
-      //errs() << "SUSAN: for curBlock:" << *CurBlock << "\n Successor: " <<
-        //*Successor << "\n printing PHI:" << *PN << "\n";
-      Out << std::string(Indent, ' ');
-      Out << "  " << GetValueName(&*I) << "__PHI_TEMPORARY = ";
-      writeOperand(IV, ContextCasted);
-      Out << ";   /* for PHI node */\n";
+
+      Out << " " << GetValueName(PN) << " = ";
+      writeOperandInternal(IV);
+      Out << ";\n";
     }
   }
 }
@@ -6168,9 +6168,9 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
-      //if(isa<ReturnInst>(bb->getTerminator())){
-      //  printPHICopiesForSuccessor(phiBB, bb, 2);
-      //}
+      if(isa<ReturnInst>(bb->getTerminator())){
+        printPHICopiesForSuccessor(phiBB, bb, 2);
+      }
       printBasicBlock(bb);
       times2bePrinted[bb]--;
     }
