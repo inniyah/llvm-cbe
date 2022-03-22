@@ -363,6 +363,7 @@ private:
   ForLoopProfile* findForLoopProfile(Loop *L);
   void printLoopBody(Loop *L);
   bool isInductionVariable(Value* V);
+  void initializeLoopPHIs(Loop *L);
 
 
   void writeOperandDeref(Value *Operand);

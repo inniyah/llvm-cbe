@@ -5462,8 +5462,33 @@ void CWriter::printLoopBody(Loop *L){
   }
 }
 
+void CWriter::initializeLoopPHIs(Loop *L){
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    for (BasicBlock::iterator I = BB->begin(); isa<PHINode>(I); ++I) {
+      PHINode *PN = cast<PHINode>(I);
+      if(isInductionVariable(cast<Value>(PN))) continue;
+      for(unsigned i=0; i<PN->getNumIncomingValues(); ++i){
+        BasicBlock* predBB = PN->getIncomingBlock(i);
+        Loop *predBBL = LI->getLoopFor(predBB);
+        if(predBBL && predBBL == L) continue;
+
+        Out << GetValueName(PN) << " = ";
+        writeOperandInternal(PN->getIncomingValue(i));
+        Out << ";\n";
+      }
+    }
+  }
+
+}
+
 void CWriter::printLoopNew(Loop *L) {
   // FIXME: assume all omp loops are for loops
+
+  //initialize all the PHI variables
+  initializeLoopPHIs(L);
+
+
 
   BasicBlock *header = L->getHeader();
   bool negateCondition = false;
