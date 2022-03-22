@@ -5552,7 +5552,7 @@ void CWriter::printLoopNew(Loop *L) {
   else{
     errs() << "SUSAN: no condinst, printing while(1)\n";
     Out << "while(1){\n";
-    printPHICopiesForAllPhis(header, 0);
+    //printPHICopiesForAllPhis(header, 0);
     printBasicBlock(header);
   }
 
@@ -5668,22 +5668,22 @@ if( NATURAL_CONTROL_FLOW ){
     }
   }
 
-  //check if a phi value need to be printed
-  std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2erase;
-  for(auto bb2phi : PHIValues2Print){
-    if(bb2phi.first == BB){
-      PHINode *phi = bb2phi.second;
-      Out << std::string(2, ' ');
-      Out << "  " << GetValueName(cast<Instruction>(phi))
-          << "__PHI_TEMPORARY = ";
-      writeOperand(phi->getIncomingValueForBlock(BB), ContextCasted);
-      Out << ";   /* for PHI node */\n";
-      PHIValues2erase.insert(bb2phi);
-    }
-  }
+  ////check if a phi value need to be printed
+  //std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2erase;
+  //for(auto bb2phi : PHIValues2Print){
+  //  if(bb2phi.first == BB){
+  //    PHINode *phi = bb2phi.second;
+  //    Out << std::string(2, ' ');
+  //    Out << "  " << GetValueName(cast<Instruction>(phi))
+  //        << "__PHI_TEMPORARY = ";
+  //    writeOperand(phi->getIncomingValueForBlock(BB), ContextCasted);
+  //    Out << ";   /* for PHI node */\n";
+  //    PHIValues2erase.insert(bb2phi);
+  //  }
+  //}
 
-  for(auto erasePhi : PHIValues2erase)
-    PHIValues2Print.erase(erasePhi);
+  //for(auto erasePhi : PHIValues2erase)
+  //  PHIValues2Print.erase(erasePhi);
 
   // Don't emit prefix or suffix for the terminator.
   visit(*BB->getTerminator());
@@ -5728,7 +5728,7 @@ void CWriter::naturalSwitchTranslation(SwitchInst &SI){
   unsigned NumBits = cast<IntegerType>(Cond->getType())->getBitWidth();
 
   if (SI.getNumCases() == 0) { // unconditional branch
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
     Out << "\n";
 
@@ -5767,7 +5767,7 @@ void CWriter::naturalSwitchTranslation(SwitchInst &SI){
     }
 
     Out << "  default:\n";
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     emitSwitchBlock(SI.getDefaultDest(), switchBB);
     Out << "    break;\n";
 
@@ -5784,12 +5784,12 @@ void CWriter::naturalSwitchTranslation(SwitchInst &SI){
       visitICmpInst(*icmp);
       delete icmp;
       Out << ") {\n";
-      printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
+      //printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
       printBranchToBlock(SI.getParent(), Succ, 2);
       Out << "  } else ";
     }
     Out << "{\n";
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
     Out << "  }\n";
   }
@@ -5808,7 +5808,7 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
   unsigned NumBits = cast<IntegerType>(Cond->getType())->getBitWidth();
 
   if (SI.getNumCases() == 0) { // unconditional branch
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
     Out << "\n";
 
@@ -5816,7 +5816,7 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
     Out << "  switch (";
     writeOperand(Cond);
     Out << ") {\n  default:\n";
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
 
     // Skip the first item since that's the default case.
@@ -5827,7 +5827,7 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
       Out << "  case ";
       writeOperand(CaseVal);
       Out << ":\n";
-      printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
+      //printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
       if (isGotoCodeNecessary(SI.getParent(), Succ))
         printBranchToBlock(SI.getParent(), Succ, 2);
       else
@@ -5846,12 +5846,12 @@ void CWriter::visitSwitchInst(SwitchInst &SI) {
       visitICmpInst(*icmp);
       delete icmp;
       Out << ") {\n";
-      printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
+      //printPHICopiesForSuccessor(SI.getParent(), Succ, 2);
       printBranchToBlock(SI.getParent(), Succ, 2);
       Out << "  } else ";
     }
     Out << "{\n";
-    printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
+    //printPHICopiesForSuccessor(SI.getParent(), SI.getDefaultDest(), 2);
     printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
     Out << "  }\n";
   }
@@ -6143,9 +6143,9 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
-      if(isa<ReturnInst>(bb->getTerminator())){
-        printPHICopiesForSuccessor(phiBB, bb, 2);
-      }
+      //if(isa<ReturnInst>(bb->getTerminator())){
+      //  printPHICopiesForSuccessor(phiBB, bb, 2);
+      //}
       printBasicBlock(bb);
       times2bePrinted[bb]--;
     }
@@ -6159,7 +6159,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 
   //special case: unconditional branch
   if(!I.isConditional()){
-    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+    //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
     return;
   }
@@ -6171,16 +6171,16 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
       writeOperand(I.getCondition(), ContextCasted);
       Out << ") {\n";
 
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
+      //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
       printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
 
       Out << "  } else {\n";
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+      //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
       printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
 
       Out << "  }\n";
     } else {
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+      //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
       printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
     }
     Out << "\n";
@@ -6249,9 +6249,9 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   if(exitLoopFalseBB || exitLoopTrueBB){
         //print exitBB
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
-        for (auto succBB = succ_begin(exitBB); succBB != succ_end(exitBB); ++succBB){
-          printPHICopiesForSuccessor(exitBB, *succBB, 2);
-        }
+        //for (auto succBB = succ_begin(exitBB); succBB != succ_end(exitBB); ++succBB){
+        //  printPHICopiesForSuccessor(exitBB, *succBB, 2);
+        //}
         for (BasicBlock::iterator I = exitBB->begin();
             cast<Instruction>(I) != exitBB->getTerminator();
             ++I){
@@ -6273,7 +6273,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
         for (auto ret = succ_begin(exitBB); ret != succ_end(exitBB); ++ret){
 	        BasicBlock *retBB = *ret;
           if(isa<ReturnInst>(retBB->getTerminator())){
-            printPHICopiesForSuccessor(exitBB, retBB, 2);
+            //printPHICopiesForSuccessor(exitBB, retBB, 2);
             printBasicBlock(retBB);
             times2bePrinted[retBB]--;
             Out << "    }\n";
@@ -6289,20 +6289,20 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 
     //Case 2: only print if body
     if(trueBrOnly){
-      printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+      //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(cbeRegion, trueStartBB);
     }
     //Case 3: only print if body with reveresed case
     else if(falseBrOnly){
-      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+      //printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(cbeRegion, falseStartBB);
     }
     //Case 4: print if & else;
     else{
-      printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+      //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       emitIfBlock(cbeRegion, trueStartBB);
       Out << "  } else {\n";
-      printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
+      //printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
       emitIfBlock(cbeRegion, falseStartBB, true);
     }
 
@@ -6331,12 +6331,12 @@ void CWriter::visitBranchInst(BranchInst &I) {
       writeOperand(I.getCondition(), ContextCasted);
       Out << ") {\n";
 
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
+      //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
       printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
 
       if (isGotoCodeNecessary(I.getParent(), I.getSuccessor(1))) {
         Out << "  } else {\n";
-        printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+        //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
         printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
       }
     } else {
@@ -6345,13 +6345,13 @@ void CWriter::visitBranchInst(BranchInst &I) {
       writeOperand(I.getCondition(), ContextCasted);
       Out << ") {\n";
 
-      printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
+      //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
       printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
     }
 
     Out << "  }\n";
   } else {
-    printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+    //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
   }
   Out << "\n";
