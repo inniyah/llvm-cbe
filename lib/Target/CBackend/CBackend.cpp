@@ -5698,14 +5698,16 @@ if( NATURAL_CONTROL_FLOW ){
     if(isa<PHINode>(inst)) continue;
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
-      Out << "  ";
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
+        Out << "  ";
         if (canDeclareLocalLate(*II)) {
           printTypeName(Out, II->getType(), false) << ' ';
         }
         Out << GetValueName(&*II) << " = ";
       }
       writeInstComputationInline(*II);
+
+      if (!isEmptyType(II->getType()) && !isInlineAsm(*II))
       Out << ";\n";
     }
   }
