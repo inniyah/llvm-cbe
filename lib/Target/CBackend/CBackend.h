@@ -361,7 +361,7 @@ private:
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition);
   ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(Loop *L);
+  void printLoopBody(ForLoopProfile *LP);
   bool isInductionVariable(Value* V);
   void initializeLoopPHIs(Loop *L);
   void printPHIsIfNecessary(BasicBlock* BB);
@@ -397,7 +397,7 @@ private:
   void printFloatingPointConstants(const Constant *C);
 
   void printFunction(Function &);
-  void printBasicBlock(BasicBlock *BB);
+  void printBasicBlock(BasicBlock *BB, std::set<Value*> skipInsts = std::set<Value*>());
   void printLoop(Loop *L);
   void printLoopNew(Loop *L);
 

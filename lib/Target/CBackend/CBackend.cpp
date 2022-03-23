@@ -5427,6 +5427,7 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
   if(!IV) return nullptr;
 
   ForLoopProfile* LP = new ForLoopProfile();
+  LP->L = L;
   LP->IV = IV;
 
   if(LI->getLoopFor(IV->getIncomingBlock(0)) != L)
@@ -5444,7 +5445,8 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
   return LP;
 }
 
-void CWriter::printLoopBody(Loop *L){
+void CWriter::printLoopBody(ForLoopProfile *LP){
+  Loop *L = LP->L;
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
@@ -5453,7 +5455,10 @@ void CWriter::printLoopBody(Loop *L){
     // Don't print Loop header any more
     if(BB != L->getHeader()){
       if (BBLoop == L){
-        printBasicBlock(BB);
+        std::set<Value*> skipInsts;
+        if(LP->incr)
+          skipInsts.insert(LP->incr);
+        printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
@@ -5532,7 +5537,7 @@ void CWriter::printLoopNew(Loop *L) {
     printInstruction(cast<Instruction>(LP->incr), false);
     Out << "){\n";
 
-    printLoopBody(L);
+    printLoopBody(LP);
 
     Out << "}\n";
 
@@ -5645,7 +5650,7 @@ void CWriter::printLoop(Loop *L) {
       << L->getHeader()->getName() << "' */\n";
 }
 
-void CWriter::printBasicBlock(BasicBlock *BB) {
+void CWriter::printBasicBlock(BasicBlock *BB, std::set<Value*> skipInsts) {
 
 if( NATURAL_CONTROL_FLOW ){
   /*
@@ -5696,6 +5701,8 @@ if( NATURAL_CONTROL_FLOW ){
 
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
     if(isa<PHINode>(inst)) continue;
+
+    if(skipInsts.find(cast<Value>(&*II)) != skipInsts.end()) continue;
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
