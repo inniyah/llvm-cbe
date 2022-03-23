@@ -5705,8 +5705,12 @@ if( NATURAL_CONTROL_FLOW ){
     if(skipInsts.find(cast<Value>(&*II)) != skipInsts.end()) continue;
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
-      if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
+      if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
         Out << "  ";
+      else
+        errs() << "SUSAN: found emptytype: " << *II << "\n";
+
+      if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
         if (canDeclareLocalLate(*II)) {
           printTypeName(Out, II->getType(), false) << ' ';
         }
@@ -5714,8 +5718,8 @@ if( NATURAL_CONTROL_FLOW ){
       }
       writeInstComputationInline(*II);
 
-      if (!isEmptyType(II->getType()) && !isInlineAsm(*II))
-      Out << ";\n";
+      if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
+        Out << ";\n";
     }
   }
 
