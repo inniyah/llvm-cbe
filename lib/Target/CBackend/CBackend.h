@@ -353,7 +353,7 @@ private:
   void findSignedInsts(Instruction* inst, Instruction* signedInst);
   void insertDeclaredInsts(Instruction* I);
   bool alreadyPrintedPHIVal(BasicBlock* predBB, PHINode* phi);
-  void markPHIs2Print(Function &F);
+  void preprossesPHIs2Print(Function &F);
   void emitOmpFunction(Function &F);
   void omp_searchForUsesToDelete(std::set<Value*> values2delete, Function &F);
   void omp_preprossesing(Function &F);
@@ -364,6 +364,7 @@ private:
   void printLoopBody(Loop *L);
   bool isInductionVariable(Value* V);
   void initializeLoopPHIs(Loop *L);
+  void printPHIsIfNecessary(BasicBlock* BB);
 
 
   void writeOperandDeref(Value *Operand);

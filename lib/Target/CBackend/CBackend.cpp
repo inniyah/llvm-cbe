@@ -846,19 +846,21 @@ Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
   return nullptr;
 }
 
-void CWriter::markPHIs2Print(Function &F){
-
-  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
-    if(!isa<PHINode>(&*I)) continue;
-    PHINode* phi = cast<PHINode>(&*I);
-    for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
-      BasicBlock* predBB = phi->getIncomingBlock(i);
-      PHIValues2Print.insert(std::make_pair(predBB, phi));
+void CWriter::preprossesPHIs2Print(Function &F){
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
+    if(PHINode *phi = dyn_cast<PHINode>(&*I)){
+      if(isInductionVariable(cast<Value>(phi))) continue;
+      for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
+        BasicBlock *predBB = phi->getIncomingBlock(i);
+        Value *phiVal = phi->getIncomingValue(i);
+        if(isa<Constant>(phiVal))
+          PHIValues2Print.insert(std::make_pair(predBB, phi));
+        else if(Instruction *I = dyn_cast<Instruction>(phiVal))
+          if(isInlinableInst(*I))
+            PHIValues2Print.insert(std::make_pair(predBB, phi));
+      }
     }
-  }
 }
-
-
 
 Value* findOriginalUb(Function &F, Value *ub){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
@@ -953,7 +955,7 @@ bool CWriter::runOnFunction(Function &F) {
 
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
-  markPHIs2Print(F);
+  preprossesPHIs2Print(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   collectNoneArrayGEPs(F);
@@ -5482,11 +5484,23 @@ void CWriter::initializeLoopPHIs(Loop *L){
 
 }
 
+void CWriter::printPHIsIfNecessary(BasicBlock *BB){
+  for(auto bb2phi : PHIValues2Print){
+    if(bb2phi.first == BB){
+      PHINode *phi = bb2phi.second;
+      Out << std::string(2, ' ');
+      Out << GetValueName(phi) << " = ";
+      writeOperandInternal(phi->getIncomingValueForBlock(BB));
+      Out << ";\n";
+    }
+  }
+}
+
 void CWriter::printLoopNew(Loop *L) {
   // FIXME: assume all omp loops are for loops
 
   //initialize all the PHI variables
-  initializeLoopPHIs(L);
+  //initializeLoopPHIs(L);
 
 
 
@@ -5697,21 +5711,8 @@ if( NATURAL_CONTROL_FLOW ){
   }
 
   ////check if a phi value need to be printed
-  //std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2erase;
-  //for(auto bb2phi : PHIValues2Print){
-  //  if(bb2phi.first == BB){
-  //    PHINode *phi = bb2phi.second;
-  //    Out << std::string(2, ' ');
-  //    Out << "  " << GetValueName(cast<Instruction>(phi))
-  //        << "__PHI_TEMPORARY = ";
-  //    writeOperand(phi->getIncomingValueForBlock(BB), ContextCasted);
-  //    Out << ";   /* for PHI node */\n";
-  //    PHIValues2erase.insert(bb2phi);
-  //  }
-  //}
+  printPHIsIfNecessary(BB);
 
-  //for(auto erasePhi : PHIValues2erase)
-  //  PHIValues2Print.erase(erasePhi);
 
   // Don't emit prefix or suffix for the terminator.
   visit(*BB->getTerminator());
@@ -6168,9 +6169,9 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
-      if(isa<ReturnInst>(bb->getTerminator())){
-        printPHICopiesForSuccessor(phiBB, bb, 2);
-      }
+      //if(isa<ReturnInst>(bb->getTerminator())){
+      //  printPHICopiesForSuccessor(phiBB, bb, 2);
+      //}
       printBasicBlock(bb);
       times2bePrinted[bb]--;
     }
@@ -6274,9 +6275,6 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   if(exitLoopFalseBB || exitLoopTrueBB){
         //print exitBB
         BasicBlock *exitBB = exitLoopFalseBB? exitLoopFalseBB : exitLoopTrueBB;
-        //for (auto succBB = succ_begin(exitBB); succBB != succ_end(exitBB); ++succBB){
-        //  printPHICopiesForSuccessor(exitBB, *succBB, 2);
-        //}
         for (BasicBlock::iterator I = exitBB->begin();
             cast<Instruction>(I) != exitBB->getTerminator();
             ++I){
@@ -6299,6 +6297,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 	        BasicBlock *retBB = *ret;
           if(isa<ReturnInst>(retBB->getTerminator())){
             //printPHICopiesForSuccessor(exitBB, retBB, 2);
+            printPHIsIfNecessary(exitBB);
             printBasicBlock(retBB);
             times2bePrinted[retBB]--;
             Out << "    }\n";
@@ -6315,6 +6314,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     //Case 2: only print if body
     if(trueBrOnly){
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
+      //printPHIsIfNecessary()
       emitIfBlock(cbeRegion, trueStartBB);
     }
     //Case 3: only print if body with reveresed case
