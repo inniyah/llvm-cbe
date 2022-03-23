@@ -68,6 +68,7 @@ typedef struct ForLoopProfile{
   Value *lb;
   Value *incr;
   PHINode *IV;
+  bool isOmpLoop;
 } ForLoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
@@ -363,6 +364,7 @@ private:
   ForLoopProfile* findForLoopProfile(Loop *L);
   void printLoopBody(ForLoopProfile *LP);
   bool isInductionVariable(Value* V);
+  bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
   void printPHIsIfNecessary(BasicBlock* BB);
 

@@ -811,9 +811,11 @@ void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
   ompLI->lb = lb;
   ompLI->incr = incr;
   ompLI->IV = getInductionVariable(L, SE);
+  ompLI->isOmpLoop = true;
   assert(ompLI->IV && "SUSAN: only translate for loop for omp right now\n");
   ompLoops.insert(ompLI);
 }
+
 Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
   Instruction *boundI = dyn_cast<Instruction>(bound);
   if(!boundI){
@@ -1394,6 +1396,23 @@ bool CWriter::isInductionVariable(Value* V){
 
   Loop* L = LI->getLoopFor(phi->getParent());
   if(L && getInductionVariable(L, SE) == phi) return true;
+
+  return false;
+}
+
+bool CWriter::isIVIncrement(Value* V){
+  Instruction* inst = dyn_cast<Instruction>(V);
+  if(!inst) return false;
+
+  Loop* L = LI->getLoopFor(inst->getParent());
+  if(!L) return false;
+
+  PHINode *IV = getInductionVariable(L, SE);
+  for(unsigned i=0; i<IV->getNumIncomingValues(); ++i){
+    BasicBlock *predBB = IV->getIncomingBlock(i);
+    if(LI->getLoopFor(predBB) == L && cast<Instruction>(IV->getIncomingValue(i)) == inst)
+      return true;
+  }
 
   return false;
 }
@@ -2128,7 +2147,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       //Out << CI->getZExtValue() << 'u';
       Out << CI->getSExtValue();
     } else if (Ty->getPrimitiveSizeInBits() <= 64) {
-      Out << "UINT64_C(" << CI->getZExtValue() << ")";
+      Out << CI->getZExtValue();
     } else if (Ty->getPrimitiveSizeInBits() <= 128) {
       headerUseInt128();
       const APInt &V = CI->getValue();
@@ -5189,14 +5208,14 @@ void CWriter::printFunction(Function &F) {
             if(MRVar2Vals.find(var) != MRVar2Vals.end()
                 && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
                 //Note: if it's IV, we know how to handle it and doesn't need to be deleted
-                if(!isInductionVariable(operand)){
+                if(!isInductionVariable(operand) && !isIVIncrement(operand)){
                   for(auto pair : IRNaming)
                     if(pair.first == operand && pair.second == var)
                       instVarPair2Delete.push_back(pair);
                   errs() << "deleting operand: " << *operand << "\n";
                 }
 
-                if(!isInductionVariable(MRVar2Vals[var])){
+                if(!isInductionVariable(MRVar2Vals[var]) && !isIVIncrement(MRVar2Vals[var])){
                   for(auto pair : IRNaming)
                     if(pair.first == MRVar2Vals[var] && pair.second == var)
                       instVarPair2Delete.push_back(pair);
@@ -5441,6 +5460,7 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
     LP->incr = IV->getIncomingValue(1);
 
   LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
+  LP->isOmpLoop = false;
 
   return LP;
 }
@@ -5530,12 +5550,26 @@ void CWriter::printLoopNew(Loop *L) {
     Out << "; ";
 
     //print exitCondtion
-    writeOperand(condInst);
-    Out << ";";
+    if(LP->isOmpLoop){
+      Out << GetValueName(LP->IV);
+      printCmpOperator(dyn_cast<ICmpInst>(condInst));
+      writeOperandInternal(LP->ub);
+      Out << ";";
+    } else {
+      writeOperand(condInst);
+      Out << ";";
+    }
 
     //print step
-    printInstruction(cast<Instruction>(LP->incr), false);
-    Out << "){\n";
+    if(LP->isOmpLoop){
+      Out << GetValueName(LP->IV);
+      Out << "+=";
+      writeOperandInternal(LP->incr);
+      Out << "){\n";
+    } else {
+      printInstruction(cast<Instruction>(LP->incr), false);
+      Out << "){\n";
+    }
 
     printLoopBody(LP);
 
