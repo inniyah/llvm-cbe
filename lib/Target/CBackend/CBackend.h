@@ -118,7 +118,6 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool IS_OPENMP_FUNCTION;
   std::set<ForLoopProfile*> ompLoops;
 
-
   CBERegion topRegion;
 
   // SUSAN: added analyses
@@ -362,11 +361,12 @@ private:
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition);
   ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(ForLoopProfile *LP);
+  void printLoopBody(ForLoopProfile *LP, bool isDoWhile = false);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
   void printPHIsIfNecessary(BasicBlock* BB);
+  void FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print);
 
 
   void writeOperandDeref(Value *Operand);

@@ -887,35 +887,65 @@ Value* findOriginalUb(Function &F, Value *ub){
 
 void CWriter::omp_preprossesing(Function &F){
 
+  //FIXME: currently only searching for the loop to be processed
+
   //delete all the uses of first and second args of the function
-  std::set<Value*> values2delete;
-  values2delete.insert(cast<Value>(F.getArg(0)));
-  values2delete.insert(cast<Value>(F.getArg(1)));
+  //std::set<Value*> values2delete;
+  //values2delete.insert(cast<Value>(F.getArg(0)));
+  //values2delete.insert(cast<Value>(F.getArg(1)));
 
   //find __kmpc_for_static_init and associated loop info
   Value *lb, *ub, *incr;
+  CallInst *initCI, *finiCI;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
-      if(Function *ompInitCall = CI->getCalledFunction()){
-        if(ompInitCall->getName().contains("__kmpc_for_static_init")){
-          errs() << "call: " << *ompInitCall << "\n";
+      if(Function *ompCall = CI->getCalledFunction()){
+        if(ompCall->getName().contains("__kmpc_for_static_init")){
+          initCI = CI;
           omp_SkipVals.insert(cast<Value>(CI));
           lb = CI->getArgOperand(4);
           ub = findOriginalUb(F, CI->getArgOperand(5));
           incr = CI->getArgOperand(7);
         }
+        else if(ompCall->getName().contains("__kmpc_for_static_fini"))
+          finiCI = CI;
       }
     }
   }
 
-  //find loop associated with the lower & upper bounds
-  if(lb){
-    Loop *L_lb = findLoopAccordingTo(F, lb);
-    CreateOmpLoops(L_lb, ub, lb, incr);
+  errs() << "susan: initCI: " << *initCI << "\n";
+  errs() << "susan: finiCI: " << *finiCI << "\n";
+
+  Loop *ompLoop = nullptr;
+  //find loop in between init and fini
+  for(auto &BB : F){
+    if(DT->dominates(initCI->getParent(), &BB)
+        && PDT->dominates(finiCI->getParent(), &BB)){
+      ompLoop = LI->getLoopFor(&BB);
+      if(ompLoop) break;
+    }
   }
 
+  assert(ompLoop && "didn't find omp loop?\n");
+  CreateOmpLoops(ompLoop, ub, lb, incr);
 
-  omp_searchForUsesToDelete(values2delete, F);
+  //find loop live-in related instructions to keep
+  for (unsigned i = 0, e = ompLoop->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = ompLoop->getBlocks()[i];
+    for(auto &inst : *BB){
+     if(isInductionVariable(cast<Value>(&inst))) continue;
+     if(isIVIncrement(cast<Value>(&inst))) continue;
+     bool negate;
+     if(&inst == findCondInst(ompLoop, negate)) continue;
+     for(Value *opnd : inst.operands()){
+       Instruction* inst = dyn_cast<Instruction>(opnd);
+       if(inst && LI->getLoopFor(inst->getParent()) != ompLoop)
+         assert(0 && "not implemented yet with live-ins!!\n");
+     }
+    }
+  }
+
+  //omp_searchForUsesToDelete(values2delete, F);
 }
 
 bool CWriter::runOnFunction(Function &F) {
@@ -2105,6 +2135,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       VectorType *VT = cast<VectorType>(CPV->getType());
       cwriter_assert(!isEmptyType(VT));
       CtorDeclTypes.insert(VT);
+      errs() << "SUSAN: inserting VT" << *VT << "\n";
       Out << "/*undef*/llvm_ctor_";
       printTypeString(Out, VT, false);
       Out << "(";
@@ -2249,6 +2280,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     ArrayType *AT = cast<ArrayType>(CPV->getType());
     cwriter_assert(AT->getNumElements() != 0 && !isEmptyType(AT));
     if (Context != ContextStatic) {
+      errs() << "SUSAN: inserting AT" << *AT << "\n";
       CtorDeclTypes.insert(AT);
       Out << "llvm_ctor_";
       printTypeString(Out, AT, false);
@@ -2288,6 +2320,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     cwriter_assert(VT->getNumElements() != 0 && !isEmptyType(VT));
     if (Context != ContextStatic) {
       CtorDeclTypes.insert(VT);
+      errs() << "SUSAN: inserting VT 2323" << *VT << "\n";
       Out << "llvm_ctor_";
       printTypeString(Out, VT, false);
       Out << "(";
@@ -2319,6 +2352,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     cwriter_assert(!isEmptyType(ST));
     if (Context != ContextStatic) {
       CtorDeclTypes.insert(ST);
+      errs() << "SUSAN: inserting ST" << *ST << "\n";
       Out << "llvm_ctor_";
       printTypeString(Out, ST, false);
       Out << "(";
@@ -4220,6 +4254,9 @@ void CWriter::generateHeader(Module &M) {
     StructType *STy = dyn_cast<StructType>(*it);
     ArrayType *ATy = dyn_cast<ArrayType>(*it);
     VectorType *VTy = dyn_cast<VectorType>(*it);
+    //errs() << "SUSAN: STy: " << *STy << "\n";
+    errs() << "SUSAN: ATy: " << *ATy << "\n";
+    //errs() << "SUSAN: VTy: " << *VTy << "\n";
     unsigned e = (STy ? STy->getNumElements()
                       : (ATy ? ATy->getNumElements() : NumberOfElements(VTy)));
     bool printed = false;
@@ -5357,17 +5394,22 @@ void CWriter::printFunction(Function &F) {
     Out << '\n';
 
   // print the basic blocks
-  for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
-    if (Loop *L = LI->getLoopFor(&*BB)) {
-      if (L->getHeader() == &*BB && L->getParentLoop() == nullptr){
-        if(NATURAL_CONTROL_FLOW)
-          printLoopNew(L);
-        else
-          printLoop(L);
+  if(IS_OPENMP_FUNCTION){
+    for(auto LP : ompLoops)
+      printLoopNew(LP->L);
+  } else {
+    for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
+      if (Loop *L = LI->getLoopFor(&*BB)) {
+        if (L->getHeader() == &*BB && L->getParentLoop() == nullptr && times2bePrinted[&*BB]){
+          if(NATURAL_CONTROL_FLOW)
+            printLoopNew(L);
+          else
+            printLoop(L);
+        }
+      } else {
+        printBasicBlock(&*BB);
+        times2bePrinted[&*BB]--;
       }
-    } else {
-      printBasicBlock(&*BB);
-      times2bePrinted[&*BB]--;
     }
   }
 
@@ -5465,7 +5507,7 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
   return LP;
 }
 
-void CWriter::printLoopBody(ForLoopProfile *LP){
+void CWriter::printLoopBody(ForLoopProfile *LP, bool isDoWhile){
   Loop *L = LP->L;
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
@@ -5473,7 +5515,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP){
     Loop *BBLoop = LI->getLoopFor(BB);
 
     // Don't print Loop header any more
-    if(BB != L->getHeader()){
+    if(BB != L->getHeader() || isDoWhile){
       if (BBLoop == L){
         std::set<Value*> skipInsts;
         if(LP->incr)
@@ -5521,6 +5563,48 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
   }
 }
 
+bool isDoWhileLoop(Loop *L){
+  //FIXME: just detecting one loop block case
+  if(L->getBlocks().size() == 1) return true;
+  return false;
+}
+
+void CWriter::FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print){
+  Instruction *inst = dyn_cast<Instruction>(val);
+  if(!inst) return;
+
+  if(!isDirectAlloca(inst))
+    insts2Print.insert(inst);
+
+
+  std::queue<Instruction*> toVisit;
+  std::set<Instruction*> visited;
+  toVisit.push(inst);
+  visited.insert(inst);
+  while(!toVisit.empty()){
+    Instruction* currInst = toVisit.front();
+    toVisit.pop();
+
+    for(Value *opnd : currInst->operands()){
+      Instruction *usedInst = dyn_cast<Instruction>(opnd);
+      if(usedInst && visited.find(usedInst) == visited.end()
+        && !isDirectAlloca(usedInst)){
+        toVisit.push(usedInst);
+        insts2Print.insert(usedInst);
+        visited.insert(usedInst);
+      }
+    }
+
+    for(User *U : currInst->users()){
+      if(StoreInst *store = dyn_cast<StoreInst>(U)){
+        toVisit.push(store);
+        insts2Print.insert(store);
+        visited.insert(store);
+      }
+    }
+  }
+}
+
 void CWriter::printLoopNew(Loop *L) {
   // FIXME: assume all omp loops are for loops
 
@@ -5532,10 +5616,24 @@ void CWriter::printLoopNew(Loop *L) {
   BasicBlock *header = L->getHeader();
   bool negateCondition = false;
   Instruction *condInst = findCondInst(L, negateCondition);
+  bool isDoWhile = isDoWhileLoop(L);
 
   //translate as a for loop
   ForLoopProfile *LP = findForLoopProfile(L);
   if(LP){
+
+    if(LP->isOmpLoop){
+      // print live-ins
+      std::set<Instruction*> insts2Print;
+      FindLiveInsFor(LP->lb, insts2Print);
+      FindLiveInsFor(LP->ub, insts2Print);
+      Function *F = header->getParent();
+      for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
+        if(insts2Print.find(&*I) != insts2Print.end())
+          printInstruction(&*I);
+
+    }
+
     Out << "for(";
     Value *initVal, *ub, *incr;
     errs() << "SUSAN: found for loop profile:\n";
@@ -5554,11 +5652,13 @@ void CWriter::printLoopNew(Loop *L) {
       Out << GetValueName(LP->IV);
       printCmpOperator(dyn_cast<ICmpInst>(condInst));
       writeOperandInternal(LP->ub);
-      Out << ";";
     } else {
       writeOperand(condInst);
-      Out << ";";
+      if(isDoWhile)
+        Out << " + 1";
     }
+
+    Out << ";";
 
     //print step
     if(LP->isOmpLoop){
@@ -5571,7 +5671,7 @@ void CWriter::printLoopNew(Loop *L) {
       Out << "){\n";
     }
 
-    printLoopBody(LP);
+    printLoopBody(LP, isDoWhile);
 
     Out << "}\n";
 
@@ -6216,12 +6316,21 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
-      //if(isa<ReturnInst>(bb->getTerminator())){
-      //  printPHICopiesForSuccessor(phiBB, bb, 2);
-      //}
-      printBasicBlock(bb);
-      times2bePrinted[bb]--;
-    }
+      if (Loop *L = LI->getLoopFor(bb)) {
+        if (L->getHeader() == bb && L->getParentLoop() == nullptr){
+          if(NATURAL_CONTROL_FLOW)
+            printLoopNew(L);
+          else
+            printLoop(L);
+        } else {
+          printBasicBlock(bb);
+          times2bePrinted[bb]--;
+        }
+      } else {
+          printBasicBlock(bb);
+          times2bePrinted[bb]--;
+      }
+   }
 }
 
 
@@ -7353,7 +7462,7 @@ void CWriter::visitCallInst(CallInst &I) {
 
       ompFuncs.insert(utask);
 
-      Out << ")";
+      Out << ");\n";
       return;
     }
   }
@@ -7468,7 +7577,7 @@ void CWriter::visitCallInst(CallInst &I) {
       writeOperand(*AI, ContextCasted);
     PrintedArg = true;
   }
-  Out << ')';
+  Out << ");\n";
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
