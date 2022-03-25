@@ -4445,20 +4445,20 @@ Instruction* CWriter::headerIsExiting(Loop *L, bool &negateCondition, BranchInst
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
     if(exit == L->getHeader()){
-      Value *opnd0 = brInst->getOperand(0);
-      Value *opnd1 = brInst->getOperand(1);
-      if(isa<CmpInst>(opnd0) || isa<UnaryInstruction>(opnd0) || isa<BinaryOperator>(opnd0) || isa<CallInst>(opnd0)){
-        if(isa<CallInst>(opnd0))
-          loopCondCalls.insert(dyn_cast<CallInst>(opnd0));
-        negateCondition = false;
-        return cast<Instruction>(opnd0);
+      Value *cond = brInst->getCondition();
+      if(isa<CmpInst>(cond) || isa<UnaryInstruction>(cond) || isa<BinaryOperator>(cond) || isa<CallInst>(cond)){
+        if(isa<CallInst>(cond))
+          loopCondCalls.insert(dyn_cast<CallInst>(cond));
+        BasicBlock *succ0 = brInst->getSuccessor(0);
+        if(LI->getLoopFor(succ0) != L) negateCondition = true;
+        return cast<Instruction>(cond);
       }
-      else if(isa<CmpInst>(opnd1) || isa<UnaryInstruction>(opnd1) || isa<BinaryOperator>(opnd1) || isa<CallInst>(opnd1)){
+      /*else if(isa<CmpInst>(opnd1) || isa<UnaryInstruction>(opnd1) || isa<BinaryOperator>(opnd1) || isa<CallInst>(opnd1)){
         if(isa<CallInst>(opnd1))
           loopCondCalls.insert(dyn_cast<CallInst>(opnd1));
         negateCondition = true;
         return cast<Instruction>(opnd1);
-      }
+      }*/
       else return nullptr;
     }
   }
@@ -5632,6 +5632,7 @@ void CWriter::printLoopNew(Loop *L) {
         if(insts2Print.find(&*I) != insts2Print.end())
           printInstruction(&*I);
 
+      Out << "#pragma omp for\n";
     }
 
     Out << "for(";
@@ -5653,9 +5654,13 @@ void CWriter::printLoopNew(Loop *L) {
       printCmpOperator(dyn_cast<ICmpInst>(condInst));
       writeOperandInternal(LP->ub);
     } else {
+      errs() << "SUSAN: condInst:" << *condInst << "\n";
+      if(negateCondition)
+        Out << "!(";
       writeOperand(condInst);
-      if(isDoWhile)
-        Out << " + 1";
+      if(negateCondition)
+        Out << ")";
+
     }
 
     Out << ";";
