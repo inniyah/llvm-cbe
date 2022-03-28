@@ -1421,6 +1421,7 @@ raw_ostream &CWriter::printStructDeclaration(raw_ostream &Out,
 }
 
 bool CWriter::isInductionVariable(Value* V){
+  if(!V) return false;
   PHINode *phi = dyn_cast<PHINode>(V);
   if(!phi) return false;
 
@@ -1431,6 +1432,7 @@ bool CWriter::isInductionVariable(Value* V){
 }
 
 bool CWriter::isIVIncrement(Value* V){
+  if(!V) return false;
   Instruction* inst = dyn_cast<Instruction>(V);
   if(!inst) return false;
 
@@ -1438,6 +1440,7 @@ bool CWriter::isIVIncrement(Value* V){
   if(!L) return false;
 
   PHINode *IV = getInductionVariable(L, SE);
+  if(!IV) return false;
   for(unsigned i=0; i<IV->getNumIncomingValues(); ++i){
     BasicBlock *predBB = IV->getIncomingBlock(i);
     if(LI->getLoopFor(predBB) == L && cast<Instruction>(IV->getIncomingValue(i)) == inst)
@@ -3543,6 +3546,7 @@ void CWriter::generateHeader(Module &M) {
     while(!workingList.empty()){
       bool isReady2Declare = true;
       GlobalVariable *currGlob = workingList.front();
+      errs() << "SUSAN: currGlob: " << *currGlob << "\n";
       workingList.pop();
 
       if(currGlob->hasInitializer()){
@@ -3557,7 +3561,7 @@ void CWriter::generateHeader(Module &M) {
               }
           }
 
-        if(ConstantArray *initArr = dyn_cast<ConstantArray>(initializer))
+        if(ConstantArray *initArr = dyn_cast<ConstantArray>(initializer)){
           for (Value *Element : initArr->operands())
             if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(Element) ){
               Value *v = initializerOp->getPointerOperand();
@@ -3568,7 +3572,20 @@ void CWriter::generateHeader(Module &M) {
                   break;
                 }
             }
+        }
 
+        if(ConstantStruct *initStruct = dyn_cast<ConstantStruct>(initializer)){
+          for (Value *Element : initStruct->operands())
+            if(GEPOperator *initializerOp = dyn_cast<GEPOperator>(Element) ){
+              Value *v = initializerOp->getPointerOperand();
+              if(GlobalVariable *globElement = dyn_cast<GlobalVariable>(v))
+                if(declared.find(globElement) == declared.end()){
+                  workingList.push(currGlob);
+                  isReady2Declare = false;
+                  break;
+                }
+            }
+        }
       }
 
 
@@ -5249,14 +5266,12 @@ void CWriter::printFunction(Function &F) {
                   for(auto pair : IRNaming)
                     if(pair.first == operand && pair.second == var)
                       instVarPair2Delete.push_back(pair);
-                  errs() << "deleting operand: " << *operand << "\n";
                 }
 
                 if(!isInductionVariable(MRVar2Vals[var]) && !isIVIncrement(MRVar2Vals[var])){
                   for(auto pair : IRNaming)
                     if(pair.first == MRVar2Vals[var] && pair.second == var)
                       instVarPair2Delete.push_back(pair);
-                  errs() << "deleting operand: " << *MRVar2Vals[var] << "\n";
                 }
 
             }
