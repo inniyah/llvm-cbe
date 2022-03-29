@@ -5439,6 +5439,7 @@ void CWriter::printFunction(Function &F) {
   if (PrintedVar)
     Out << '\n';
 
+  std::set<BasicBlock*> delayedBBs;
   // print the basic blocks
   if(IS_OPENMP_FUNCTION){
     for(auto LP : ompLoops)
@@ -5453,10 +5454,23 @@ void CWriter::printFunction(Function &F) {
             printLoop(L);
         }
       } else {
+        BasicBlock *bb = &*BB;
+        if(isa<ReturnInst>(bb->getTerminator())){
+          BasicBlock *nextBB = &*(std::next(Function::iterator(bb)));
+          if(nextBB){
+            delayedBBs.insert(bb);
+            continue;
+          }
+        }
         printBasicBlock(&*BB);
         times2bePrinted[&*BB]--;
       }
     }
+  }
+
+  for(auto BB : delayedBBs){
+    printBasicBlock(BB);
+    times2bePrinted[BB]--;
   }
 
   Out << "}\n\n";
