@@ -5331,9 +5331,13 @@ void CWriter::printFunction(Function &F) {
       if(inst2var.second == signedVar)
         signedInsts.insert(inst2var.first);
 
+  std::set<std::string> declaredLocals;
   // print local variable information for the function
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if (AllocaInst *AI = isDirectAlloca(&*I)) {
+      auto varName = GetValueName(AI);
+      if(declaredLocals.find(varName) != declaredLocals.end()) continue;
+      declaredLocals.insert(varName);
 
       Out << "  ";
 
@@ -5352,7 +5356,7 @@ void CWriter::printFunction(Function &F) {
           printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
       }
 
-      Out << ' ' << GetValueName(AI);
+      Out << ' ' << varName;
 
       ArrayType *ArrTy = dyn_cast<ArrayType>(AI->getAllocatedType());
       while(ArrTy){
@@ -5364,22 +5368,26 @@ void CWriter::printFunction(Function &F) {
       PrintedVar = true;
     } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
       if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
+        auto varName = GetValueName(&*I);
+        if(declaredLocals.find(varName) != declaredLocals.end()) continue;
+        declaredLocals.insert(varName);
+
         errs() << "SUSAN: declaring " << *I << "\n";
         Out << "  ";
 
         bool printedType = false;
         for(auto [sextInst, inst] : declareAsCastedType)
           if(inst == &*I){
-            printTypeName(Out, sextInst->getType(), true) << ' ' << GetValueName(&*I);
+            printTypeName(Out, sextInst->getType(), true) << ' ' << varName;
             printedType = true;
             break;
           }
 
         if(!printedType){
           if(signedInsts.find(&*I) != signedInsts.end())
-            printTypeName(Out, I->getType(), true) << ' ' << GetValueName(&*I);
+            printTypeName(Out, I->getType(), true) << ' ' << varName;
           else
-            printTypeName(Out, I->getType(), false) << ' ' << GetValueName(&*I);
+            printTypeName(Out, I->getType(), false) << ' ' << varName;
         }
 
         Out << ";\n";
