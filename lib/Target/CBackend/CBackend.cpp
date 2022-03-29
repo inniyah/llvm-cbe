@@ -727,80 +727,97 @@ std::set<BasicBlock*> CWriter::findRegionEntriesOfBB (BasicBlock* BB){
 void CWriter::determineControlFlowTranslationMethod(Function &F){
   NATURAL_CONTROL_FLOW = true;
 
-  for(auto &BB : F){
-
-    for(auto &I : BB){
-      if(isa<SwitchInst>(I)){
-        NATURAL_CONTROL_FLOW = false;
-        return;
-      }
-    }
-  }
-
-
+//  for(auto &BB : F){
+//
+//    for(auto &I : BB){
+//      if(isa<SwitchInst>(I)){
+//        errs() << "SUSAN: don't do natural translation due to switch statement\n";
+//        NATURAL_CONTROL_FLOW = false;
+//        return;
+//      }
+//    }
+//  }
+//
+//
   markBBwithNumOfVisits(F);
-  for(auto &BB : F){
-    if(BasicBlock *uniqueSucc = BB.getUniqueSuccessor()){
-      if(std::next(Function::iterator(&BB)) != Function::iterator(uniqueSucc)){
-
-        // if it's a loop backedge then we can translate it
-        bool isBackEdge = false;
-        for(auto backEdge : backEdges){
-          if(backEdge.first == &BB && backEdge.second == uniqueSucc)
-            isBackEdge = true;
-        }
-
-        // if it's a exiting function edge we can translate it
-        bool isExitingFunctionEdge = false;
-        Instruction *term = uniqueSucc->getTerminator();
-        if(isa<ReturnInst>(term) || isa<UnreachableInst>(term))
-          isExitingFunctionEdge = true;
-
-        // if its an edge that's branch to a post dominator inside of a cberegion, we can translate it
-        bool isBranchMergeEdge = false;
-        std::set<BasicBlock*> brBlocks = findRegionEntriesOfBB(&BB);
-        for(auto brBB : brBlocks){
-          if(PDT->dominates(uniqueSucc, brBB))
-            isBranchMergeEdge = true;
-        }
-
-        if(!isBackEdge && !isExitingFunctionEdge && !isBranchMergeEdge){
-          NATURAL_CONTROL_FLOW = false;
-          return;
-        }
-
-      }
-    }
-  }
-
+//  for(auto &BB : F){
+//    if(BasicBlock *uniqueSucc = BB.getUniqueSuccessor()){
+//      if(std::next(Function::iterator(&BB)) != Function::iterator(uniqueSucc)){
+//
+//        // if it's a loop backedge then we can translate it
+//        bool isBackEdge = false;
+//        for(auto backEdge : backEdges){
+//          if(backEdge.first == &BB && backEdge.second == uniqueSucc)
+//            isBackEdge = true;
+//        }
+//
+//        // if it's a exiting function edge we can translate it
+//        bool isExitingFunctionEdge = false;
+//        Instruction *term = uniqueSucc->getTerminator();
+//        if(isa<ReturnInst>(term) || isa<UnreachableInst>(term))
+//          isExitingFunctionEdge = true;
+//
+//        // if its an edge that's branch to a post dominator inside of a cberegion, we can translate it
+//        bool isBranchMergeEdge = false;
+//        std::set<BasicBlock*> brBlocks = findRegionEntriesOfBB(&BB);
+//        for(auto brBB : brBlocks){
+//          if(PDT->dominates(uniqueSucc, brBB))
+//            isBranchMergeEdge = true;
+//        }
+//
+//        if(!isBackEdge && !isExitingFunctionEdge && !isBranchMergeEdge){
+//          errs() << "SUSAN: not natural at 769\n";
+//          NATURAL_CONTROL_FLOW = false;
+//          return;
+//        }
+//
+//      }
+//    }
+//  }
+//
 
 
 }
 
 PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
+  errs() << "trying to get IV for Loop:" << *L << "\n";
   PHINode *InnerIndexVar = L->getCanonicalInductionVariable();
-  if (InnerIndexVar)
+  if (InnerIndexVar){
+    errs() << "SUSAN: found IV 784\n";
     return InnerIndexVar;
-  if (L->getLoopLatch() == nullptr || L->getLoopPredecessor() == nullptr)
+  }
+  if (L->getLoopLatch() == nullptr || L->getLoopPredecessor() == nullptr){
+    errs() << "SUSAN: didn't find IV 788\n";
     return nullptr;
+  }
   for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
     PHINode *PhiVar = cast<PHINode>(I);
+    errs() << "SUSAN: phi: " << *PhiVar << "\n";
     Type *PhiTy = PhiVar->getType();
     if (!PhiTy->isIntegerTy() && !PhiTy->isFloatingPointTy() &&
-        !PhiTy->isPointerTy())
+        !PhiTy->isPointerTy()){
+      errs() << "SUSAN: didn't find IV 796\n";
       return nullptr;
+    }
     const SCEVAddRecExpr *AddRec =
         dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
-    if (!AddRec || !AddRec->isAffine())
+    if (!AddRec || !AddRec->isAffine()){
+      errs() << "SUSAN: can't find addRec\n";
       continue;
-    const SCEV *Step = AddRec->getStepRecurrence(*SE);
-    if (!isa<SCEVConstant>(Step))
-      continue;
+    }
+    //const SCEV *Step = AddRec->getStepRecurrence(*SE);
+    //if (!isa<SCEVConstant>(Step) || !isa<SCEVSequentialMinMaxExpr>(Step)){
+    //  errs() << "SUSAN: step isn't constant\n";
+    //  continue;
+    //}
+
     // Found the induction variable.
     // FIXME: Handle loops with more than one induction variable. Note that,
     // currently, legality makes sure we have only one induction variable.
+    errs() << "SUSAN: find IV 809\n";
     return PhiVar;
   }
+  errs() << "SUSAN: didn't find IV 812\n";
   return nullptr;
 }
 
@@ -865,6 +882,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
 }
 
 Value* findOriginalUb(Function &F, Value *ub){
+  errs() << "SUSAN: ub: " << *ub << "\n";
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I))
       if(Function *ompInitCall = CI->getCalledFunction())
@@ -874,7 +892,7 @@ Value* findOriginalUb(Function &F, Value *ub){
     if(StoreInst *store = dyn_cast<StoreInst>(&*I))
       if(store->getOperand(1) == ub){
         BinaryOperator *subInst = dyn_cast<BinaryOperator>(store->getOperand(0));
-        if(subInst->getOpcode() == Instruction::Add || subInst->getOpcode() == Instruction::FAdd){
+        if(subInst && (subInst->getOpcode() == Instruction::Add || subInst->getOpcode() == Instruction::FAdd)){
           if(ConstantInt *minusOne = dyn_cast<ConstantInt>(subInst->getOperand(1)))
             if(minusOne->getSExtValue() == -1){
               return subInst->getOperand(0);
@@ -927,6 +945,8 @@ void CWriter::omp_preprossesing(Function &F){
   }
 
   assert(ompLoop && "didn't find omp loop?\n");
+  errs() << "SUSAN: omploop:" << *ompLoop << "\n";
+
   CreateOmpLoops(ompLoop, ub, lb, incr);
 
   //find loop live-in related instructions to keep
@@ -939,8 +959,9 @@ void CWriter::omp_preprossesing(Function &F){
      if(&inst == findCondInst(ompLoop, negate)) continue;
      for(Value *opnd : inst.operands()){
        Instruction* inst = dyn_cast<Instruction>(opnd);
-       if(inst && LI->getLoopFor(inst->getParent()) != ompLoop)
-         assert(0 && "not implemented yet with live-ins!!\n");
+       //errs() << "SUSAN: live in: " << *inst << "\n";
+       //if(inst && LI->getLoopFor(inst->getParent()) != ompLoop)
+         //assert(0 && "not implemented yet with live-ins!!\n");
      }
     }
   }
@@ -4450,6 +4471,7 @@ void CWriter::markLoopIrregularExits(Function &F){
 }
 
 Instruction* CWriter::headerIsExiting(Loop *L, bool &negateCondition, BranchInst* brInst){
+  errs() << "SUSAN: trying to get exit for loop: " << *L << "\n";
   if(!brInst){
     BasicBlock *header = L->getHeader();
     Instruction* term = header->getTerminator();
@@ -4461,6 +4483,7 @@ Instruction* CWriter::headerIsExiting(Loop *L, bool &negateCondition, BranchInst
   L->getExitingBlocks(ExitingBlocks);
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
+    errs() << "SUSAN exitBB: "  << *exit << "\n";
     if(exit == L->getHeader()){
       Value *cond = brInst->getCondition();
       if(isa<CmpInst>(cond) || isa<UnaryInstruction>(cond) || isa<BinaryOperator>(cond) || isa<CallInst>(cond)){
@@ -5477,7 +5500,7 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
 }
 
 
-Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
+Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop){
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
@@ -5489,8 +5512,23 @@ Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
   Instruction* term = header->getTerminator();
   BranchInst* brInst = dyn_cast<BranchInst>(term);
 
+  for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
+    BasicBlock *exit = *i;
+    Instruction* term = exit->getTerminator();
+    BranchInst* brInst = dyn_cast<BranchInst>(term);
+    if(!L->isLoopLatch(exit)) continue;
+    errs() << "SUSAN exitBB: "  << *exit << "\n";
+      Value *cond = brInst->getCondition();
+      if(isa<CmpInst>(cond) || isa<UnaryInstruction>(cond) || isa<BinaryOperator>(cond) || isa<CallInst>(cond)){
+        if(isa<CallInst>(cond))
+          loopCondCalls.insert(dyn_cast<CallInst>(cond));
+        BasicBlock *succ0 = brInst->getSuccessor(0);
+        if(LI->getLoopFor(succ0) != L) negateCondition = true;
+        return cast<Instruction>(cond);
+      }
+    }
 
-  return headerIsExiting(L, negateCondition, brInst);
+  return nullptr;
 }
 
 ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
@@ -5626,18 +5664,25 @@ void CWriter::printLoopNew(Loop *L) {
   //initialize all the PHI variables
   //initializeLoopPHIs(L);
 
+  errs() << "SUSAN: start printing loop: "  << *L << "\n";
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    errs() << "SUSAN: loop block: " << BB->getName() << "\n";
+  }
+
 
 
   BasicBlock *header = L->getHeader();
   bool negateCondition = false;
-  Instruction *condInst = findCondInst(L, negateCondition);
   bool isDoWhile = isDoWhileLoop(L);
+  Instruction *condInst = findCondInst(L, negateCondition);
 
   //translate as a for loop
   ForLoopProfile *LP = findForLoopProfile(L);
   if(LP){
 
     if(LP->isOmpLoop){
+      condInst = findCondInst(L, negateCondition, true);
       // print live-ins
       std::set<Instruction*> insts2Print;
       FindLiveInsFor(LP->lb, insts2Print);
@@ -5666,6 +5711,7 @@ void CWriter::printLoopNew(Loop *L) {
     //print exitCondtion
     if(LP->isOmpLoop){
       Out << GetValueName(LP->IV);
+      errs() << "SUSAN: condInst: " << *condInst << "\n";
       printCmpOperator(dyn_cast<ICmpInst>(condInst));
       writeOperandInternal(LP->ub);
     } else {

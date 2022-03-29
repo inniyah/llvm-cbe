@@ -359,7 +359,7 @@ private:
   void omp_preprossesing(Function &F);
   Loop* findLoopAccordingTo(Function &F, Value *bound);
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
-  Instruction* findCondInst(Loop *L, bool &negateCondition);
+  Instruction* findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop = false);
   ForLoopProfile* findForLoopProfile(Loop *L);
   void printLoopBody(ForLoopProfile *LP, bool isDoWhile = false);
   bool isInductionVariable(Value* V);
