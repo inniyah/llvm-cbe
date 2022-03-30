@@ -5599,8 +5599,9 @@ void CWriter::printLoopBody(ForLoopProfile *LP){
     Loop *BBLoop = LI->getLoopFor(BB);
     errs() << "trying to print BB: " << BB->getName() << "\n";
     // Don't print Loop latch any more
-    BasicBlock *skipBlock = findDoWhileExitingLatchBlock(L);
-    errs() << "skipBB = " << skipBlock->getName() << "\n";
+    BasicBlock *skipBlock = nullptr;
+    if(L->getBlocks().size() > 1)
+      skipBlock = findDoWhileExitingLatchBlock(L);
     if(BB != skipBlock){
       if (BBLoop == L){
         std::set<Value*> skipInsts;
