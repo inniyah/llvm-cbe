@@ -117,6 +117,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
   std::set<ForLoopProfile*> ompLoops;
+  std::set<GetElementPtrInst*> GEPNeedsReference;
 
   CBERegion topRegion;
 
@@ -475,7 +476,7 @@ private:
                                   unsigned Indent);
   void printBranchToBlock(BasicBlock *CurBlock, BasicBlock *SuccBlock,
                           unsigned Indent);
-  bool printGEPExpressionStruct(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory = false);
+  bool printGEPExpressionStruct(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory = false, bool printReference = false);
   void printGEPExpressionArray(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory=false);
 
   std::string GetValueName(Value *Operand);

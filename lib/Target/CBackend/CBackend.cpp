@@ -577,10 +577,10 @@ void CheckAndAddArrayGep2NoneArrayGEPs(GetElementPtrInst *gepInst, std::set<GetE
 void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
   if(++depths > 20) return;
 
-  if(Times2Dereference.find(cast<Value>(UO)) == Times2Dereference.end())
-    Times2Dereference[cast<Value>(UO)] = 1;
+  if(Times2Dereference.find(UO) == Times2Dereference.end())
+    Times2Dereference[UO] = 0;
   else
-    Times2Dereference[cast<Value>(UO)]++;
+    Times2Dereference[UO]++;
 
   if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
     Type *nextTy = ptrTy->getPointerElementType();
@@ -8124,7 +8124,7 @@ Value* CWriter::findUnderlyingObject(Value *Ptr){
 }
 
 bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
-                                 gep_type_iterator E, bool accessMemory) {
+                                 gep_type_iterator E, bool accessMemory, bool printReference) {
   // If there are no indices, just print out the pointer.
   if (I == E) {
     writeOperand(Ptr);
@@ -8140,7 +8140,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       LastIndexIsVector = dyn_cast<VectorType>(TmpI.getIndexedType());
   }
 
-  Out << "(";
+  if(printReference)
+    Out << "(&";
 
   // If the last index is into a vector, we can't print it as &a[i][j] because
   // we can't index into a vector with j in GCC.  Instead, emit this as
@@ -8290,16 +8291,16 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     Value *Opnd = I.getOperand();
     if(isa<ArrayType>(prevType)){
       if(accessMemory){
-        if(currValue2DerefCnt.second){
+        //if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
           Out << '[';
           writeOperand(Opnd);
           Out << ']';
           isPointer = false;
-        }
-        else{
-          assert( 0 && "SUSAN: dereferencing more than expected?\n");
-        }
+        //}
+        //else{
+        //  assert( 0 && "SUSAN: dereferencing more than expected?\n");
+        //}
       } else if(!isConstantNull(Opnd)) {
         if(currValue2DerefCnt.second){
           currValue2DerefCnt.second--;
@@ -8340,7 +8341,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     prevType = I.getIndexedType();
   }
 
-  Out << ")";
+  if(printReference)
+    Out << ")";
   return isPointer;
 
  // if (!isConstantNull(FirstOp)) {
@@ -8543,9 +8545,16 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
 
   if(gepInst){
+    Value *UO = findUnderlyingObject(gepInst->getPointerOperand());
+    int dereferenceTimes = Times2Dereference[UO];
     while (gepInst){
+      if(!dereferenceTimes){
+        GEPNeedsReference.insert(gepInst);
+      }
+
       accessGEPMemory.insert(gepInst);
       gepInst = dyn_cast<GetElementPtrInst>(gepInst->getPointerOperand());
+      dereferenceTimes--;
     }
     writeOperandInternal(Operand);
     accessGEPMemory.clear();
@@ -8697,18 +8706,22 @@ bool CWriter::GEPAccessesMemory(GetElementPtrInst *I){
 
 void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   CurInstr = &I;
-
   bool accessMemory = false;
   if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
 
+  if(accessMemory)
+    errs() << "SUSAN: GEP accesses memory\n";
 //  bool prevGEPisPointer = false;
 //  if(GetElementPtrInst *prevGEP = dyn_cast<GetElementPtrInst>(I.getPointerOperand())){
 //    if(GEPPointers.find(prevGEP) != GEPPointers.end())
 //      prevGEPisPointer = true;
 //  }
 
+  bool printReference = false;
+  if(GEPNeedsReference.find(&I) != GEPNeedsReference.end())
+    printReference = true;
 
-  bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory);
+  bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory, printReference);
   if(currGEPisPointer)GEPPointers.insert(&I);
 }
 
