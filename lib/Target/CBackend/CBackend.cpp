@@ -5445,25 +5445,33 @@ void CWriter::printFunction(Function &F) {
     for(auto LP : ompLoops)
       printLoopNew(LP->L);
   } else {
-    for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
-      if (Loop *L = LI->getLoopFor(&*BB)) {
-        if (L->getHeader() == &*BB && L->getParentLoop() == nullptr && times2bePrinted[&*BB]){
+    std::queue<BasicBlock*> toVisit;
+    std::set<BasicBlock*> visited;
+    toVisit.push(&F.getEntryBlock());
+    visited.insert(&F.getEntryBlock());
+    while(!toVisit.empty()){
+	    BasicBlock *currBB = toVisit.front();
+	    toVisit.pop();
+      if (Loop *L = LI->getLoopFor(currBB)) {
+        if (L->getHeader() == currBB
+            && L->getParentLoop() == nullptr
+            && times2bePrinted[currBB]) {
           if(NATURAL_CONTROL_FLOW)
             printLoopNew(L);
           else
             printLoop(L);
         }
       } else {
-        BasicBlock *bb = &*BB;
-        if(isa<ReturnInst>(bb->getTerminator())){
-          BasicBlock *nextBB = &*(std::next(Function::iterator(bb)));
-          if(nextBB){
-            delayedBBs.insert(bb);
-            continue;
-          }
+        printBasicBlock(currBB);
+        times2bePrinted[currBB]--;
+      }
+
+	    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+		    BasicBlock *succBB = *succ;
+		    if(visited.find(succBB)==visited.end()){
+          toVisit.push(succBB);
+          visited.insert(succBB);
         }
-        printBasicBlock(&*BB);
-        times2bePrinted[&*BB]--;
       }
     }
   }
@@ -5522,33 +5530,34 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
 }
 
 
-Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop){
+BasicBlock *findDoWhileExitingLatchBlock(Loop *L){
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
   L->getExitBlocks(ExitBlocks);
 
-  std::vector<Instruction*> exitConditionUpdates;
-
-  BasicBlock *header = L->getHeader();
-  Instruction* term = header->getTerminator();
-  BranchInst* brInst = dyn_cast<BranchInst>(term);
-
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
     Instruction* term = exit->getTerminator();
     BranchInst* brInst = dyn_cast<BranchInst>(term);
-    if(!L->isLoopLatch(exit)) continue;
-    errs() << "SUSAN exitBB: "  << *exit << "\n";
-      Value *cond = brInst->getCondition();
-      if(isa<CmpInst>(cond) || isa<UnaryInstruction>(cond) || isa<BinaryOperator>(cond) || isa<CallInst>(cond)){
-        if(isa<CallInst>(cond))
-          loopCondCalls.insert(dyn_cast<CallInst>(cond));
-        BasicBlock *succ0 = brInst->getSuccessor(0);
-        if(LI->getLoopFor(succ0) != L) negateCondition = true;
-        return cast<Instruction>(cond);
-      }
-    }
+    if(L->isLoopLatch(exit)) return exit;
+  }
+  return nullptr;
+}
+
+Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop){
+
+  BasicBlock *condBB = findDoWhileExitingLatchBlock(L);
+  Instruction* term = condBB->getTerminator();
+  BranchInst* brInst = dyn_cast<BranchInst>(term);
+  Value *cond = brInst->getCondition();
+  if(isa<CmpInst>(cond) || isa<UnaryInstruction>(cond) || isa<BinaryOperator>(cond) || isa<CallInst>(cond)){
+    if(isa<CallInst>(cond))
+      loopCondCalls.insert(dyn_cast<CallInst>(cond));
+    BasicBlock *succ0 = brInst->getSuccessor(0);
+    if(LI->getLoopFor(succ0) != L) negateCondition = true;
+    return cast<Instruction>(cond);
+  }
 
   return nullptr;
 }
@@ -5582,15 +5591,17 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
   return LP;
 }
 
-void CWriter::printLoopBody(ForLoopProfile *LP, bool isDoWhile){
+void CWriter::printLoopBody(ForLoopProfile *LP){
   Loop *L = LP->L;
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
-
-    // Don't print Loop header any more
-    if(BB != L->getHeader() || isDoWhile){
+    errs() << "trying to print BB: " << BB->getName() << "\n";
+    // Don't print Loop latch any more
+    BasicBlock *skipBlock = findDoWhileExitingLatchBlock(L);
+    errs() << "skipBB = " << skipBlock->getName() << "\n";
+    if(BB != skipBlock){
       if (BBLoop == L){
         std::set<Value*> skipInsts;
         if(LP->incr)
@@ -5636,12 +5647,6 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
       Out << ";\n";
     }
   }
-}
-
-bool isDoWhileLoop(Loop *L){
-  //FIXME: just detecting one loop block case
-  if(L->getBlocks().size() == 1) return true;
-  return false;
 }
 
 void CWriter::FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print){
@@ -5696,7 +5701,6 @@ void CWriter::printLoopNew(Loop *L) {
 
   BasicBlock *header = L->getHeader();
   bool negateCondition = false;
-  bool isDoWhile = isDoWhileLoop(L);
   Instruction *condInst = findCondInst(L, negateCondition);
 
   //translate as a for loop
@@ -5759,7 +5763,7 @@ void CWriter::printLoopNew(Loop *L) {
       Out << "){\n";
     }
 
-    printLoopBody(LP, isDoWhile);
+    printLoopBody(LP);
 
     Out << "}\n";
 

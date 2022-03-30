@@ -361,7 +361,7 @@ private:
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop = false);
   ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(ForLoopProfile *LP, bool isDoWhile = false);
+  void printLoopBody(ForLoopProfile *LP);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
