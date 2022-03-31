@@ -584,6 +584,10 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
 
   if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
     Type *nextTy = ptrTy->getPointerElementType();
+    if(isa<IntegerType>(nextTy)){
+      Times2Dereference[UO]++;
+      return;
+    }
     if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
       findVariableDepth(nextTy, UO, depths);
   }
@@ -8140,8 +8144,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
       LastIndexIsVector = dyn_cast<VectorType>(TmpI.getIndexedType());
   }
 
-  if(printReference)
-    Out << "(&";
+
 
   // If the last index is into a vector, we can't print it as &a[i][j] because
   // we can't index into a vector with j in GCC.  Instead, emit this as
@@ -8201,6 +8204,8 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
   Type *IntoT = I.getIndexedType();
   Value *FirstOp = I.getOperand();
+  if( printReference && (isConstantNull(FirstOp) || isNegative(FirstOp)) )
+    Out << "(&";
 
   bool currGEPisPointer = !(isa<GetElementPtrInst>(Ptr) || isa<AllocaInst>(Ptr) || isa<GlobalVariable>(Ptr));
   //first index
@@ -8256,7 +8261,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     else{
 
 
-      if(!isConstantNull(FirstOp)){
+      if(!isConstantNull(FirstOp) && !printReference){
         Out << '(';
         writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
@@ -8341,7 +8346,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     prevType = I.getIndexedType();
   }
 
-  if(printReference)
+  if( printReference && (isConstantNull(FirstOp) || isNegative(FirstOp)) )
     Out << ")";
   return isPointer;
 
@@ -8545,8 +8550,10 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
   GetElementPtrInst *gepInst = dyn_cast<GetElementPtrInst>(Operand);
 
   if(gepInst){
+    errs() <<  "SUSAN: GEPINST: " << *gepInst << "\n";
     Value *UO = findUnderlyingObject(gepInst->getPointerOperand());
     int dereferenceTimes = Times2Dereference[UO];
+    errs() << "SUSAN: dereferenceTimes = " << dereferenceTimes << "\n";
     while (gepInst){
       if(!dereferenceTimes){
         GEPNeedsReference.insert(gepInst);
@@ -8709,20 +8716,25 @@ void CWriter::visitGetElementPtrInst(GetElementPtrInst &I) {
   bool accessMemory = false;
   if(accessGEPMemory.find(&I) != accessGEPMemory.end()) accessMemory = true;
 
-  if(accessMemory)
-    errs() << "SUSAN: GEP accesses memory\n";
 //  bool prevGEPisPointer = false;
 //  if(GetElementPtrInst *prevGEP = dyn_cast<GetElementPtrInst>(I.getPointerOperand())){
 //    if(GEPPointers.find(prevGEP) != GEPPointers.end())
 //      prevGEPisPointer = true;
 //  }
 
+  errs() << "SUSAN: printing GEP: " << I << "\n";
   bool printReference = false;
   if(GEPNeedsReference.find(&I) != GEPNeedsReference.end())
     printReference = true;
 
+  if(accessMemory)
+    errs() << "SUSAN: accessMemory true\n";
+
+  if(printReference)
+    errs() << "SUSAN: printReference true\n";
+
   bool currGEPisPointer = printGEPExpressionStruct(I.getPointerOperand(), gep_type_begin(I), gep_type_end(I), accessMemory, printReference);
-  if(currGEPisPointer)GEPPointers.insert(&I);
+  if(currGEPisPointer) GEPPointers.insert(&I);
 }
 
 void CWriter::visitVAArgInst(VAArgInst &I) {
