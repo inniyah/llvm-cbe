@@ -118,6 +118,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool IS_OPENMP_FUNCTION;
   std::set<ForLoopProfile*> ompLoops;
   std::set<GetElementPtrInst*> GEPNeedsReference;
+  std::set<Value*>skipInstsForPhis;
+  std::map<PHINode*, Value*>phis2print;
 
   CBERegion topRegion;
 

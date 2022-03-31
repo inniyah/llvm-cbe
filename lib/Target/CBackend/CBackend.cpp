@@ -872,16 +872,46 @@ Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
 void CWriter::preprossesPHIs2Print(Function &F){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
     if(PHINode *phi = dyn_cast<PHINode>(&*I)){
+
+      Value *ldPtr = nullptr;
+      Value *stPtr = nullptr;
+      LoadInst *ldInst = nullptr;
+      StoreInst *stInst = nullptr;
+
       if(isInductionVariable(cast<Value>(phi))) continue;
       for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
         BasicBlock *predBB = phi->getIncomingBlock(i);
         Value *phiVal = phi->getIncomingValue(i);
         if(isa<Constant>(phiVal))
           PHIValues2Print.insert(std::make_pair(predBB, phi));
-        else if(Instruction *I = dyn_cast<Instruction>(phiVal))
+        else if(Instruction *I = dyn_cast<Instruction>(phiVal)){
           if(isInlinableInst(*I))
             PHIValues2Print.insert(std::make_pair(predBB, phi));
+          else if(isa<LoadInst>(I)){
+            ldInst = cast<LoadInst>(I);
+            ldPtr = ldInst->getPointerOperand();
+          }
+          else if(isa<StoreInst>(I)){
+            stInst = cast<StoreInst>(I);
+            stPtr = stInst->getPointerOperand();
+          } else {
+           for(User *U : I->users()){
+            if(isa<StoreInst>(U)){
+              stInst = cast<StoreInst>(U);
+              stPtr = stInst->getPointerOperand();
+            }
+           }
+          }
+
+        }
       }
+
+      if(ldPtr && stPtr && ldPtr == stPtr){
+        skipInstsForPhis.insert(cast<Instruction>(ldInst));
+        skipInstsForPhis.insert(cast<Instruction>(stInst));
+        phis2print[phi] = ldPtr;
+      }
+
     }
 }
 
@@ -934,9 +964,6 @@ void CWriter::omp_preprossesing(Function &F){
       }
     }
   }
-
-  errs() << "susan: initCI: " << *initCI << "\n";
-  errs() << "susan: finiCI: " << *finiCI << "\n";
 
   Loop *ompLoop = nullptr;
   //find loop in between init and fini
@@ -2639,6 +2666,13 @@ void CWriter::writeOperandInternal(Value *Operand,
 }
 
 void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool startExpression) {
+  if(PHINode *phi = dyn_cast<PHINode>(Operand)){
+    if(phis2print.find(phi) != phis2print.end()){
+      writeOperand(phis2print[phi]);
+      return;
+    }
+  }
+
   bool isAddressImplicit = isAddressExposed(Operand);
   // Global variables are referenced as their addresses by llvm
   if (isAddressImplicit) {
@@ -5608,6 +5642,18 @@ void CWriter::printLoopBody(ForLoopProfile *LP){
       skipBlock = findDoWhileExitingLatchBlock(L);
     if(BB != skipBlock){
       if (BBLoop == L){
+        if(BB == L->getHeader()){
+          bool skipHeader = false;
+	        for (auto succ = succ_begin(BB); succ != succ_end(BB); ++succ){
+            BasicBlock* succBB = *succ;
+            if(skipBlock && succBB == skipBlock){
+              skipHeader = true;
+              break;
+            }
+          }
+          if(skipHeader)
+            continue;
+        }
         std::set<Value*> skipInsts;
         if(LP->incr)
           skipInsts.insert(LP->incr);
@@ -5768,6 +5814,7 @@ void CWriter::printLoopNew(Loop *L) {
       Out << "){\n";
     }
 
+    errs() << "SUSAN: printing loop body for" << *LP->L << "\n";
     printLoopBody(LP);
 
     Out << "}\n";
@@ -5931,7 +5978,8 @@ if( NATURAL_CONTROL_FLOW ){
     Instruction* inst = &*II;
 
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
-    if(isa<PHINode>(inst)) continue;
+    if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
+    if(dyn_cast<PHINode>(inst)) continue;
 
     if(skipInsts.find(cast<Value>(&*II)) != skipInsts.end()) continue;
 
