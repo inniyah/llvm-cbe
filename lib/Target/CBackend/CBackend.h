@@ -364,12 +364,14 @@ private:
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop = false);
   ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(ForLoopProfile *LP);
+  void printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
   void printPHIsIfNecessary(BasicBlock* BB);
-  void FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print);
+  void FindLiveInsFor(Loop *L, Value *val, std::set<Instruction*> &insts2Print);
+  void searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks);
+  void findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts);
 
 
   void writeOperandDeref(Value *Operand);

@@ -5554,6 +5554,7 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
 
 void CWriter::printInstruction(Instruction *I, bool printSemiColon){
     if(omp_SkipVals.find(I) != omp_SkipVals.end()) return;
+    errs() << "SUSAN: did omp_SkipVals skips my inst?\n";
     Out << "  ";
     if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
       if (canDeclareLocalLate(*I)) {
@@ -5629,13 +5630,40 @@ ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
   return LP;
 }
 
-void CWriter::printLoopBody(ForLoopProfile *LP){
+void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts){
+
+  if(!skipBlock) return;
+
+  Instruction *term = skipBlock->getTerminator();
+  std::queue<Instruction*> toVisit;
+  std::set<Instruction*> visited;
+
+  toVisit.push(term);
+  visited.insert(term);
+
+  while(!toVisit.empty()){
+    Instruction *currInst = toVisit.front();
+    toVisit.pop();
+
+    for(Value *opnd : currInst->operands()){
+      Instruction *usedInst = dyn_cast<Instruction>(opnd);
+      if(usedInst &&
+        usedInst->getParent() == skipBlock &&
+        visited.find(usedInst) == visited.end()){
+        toVisit.push(usedInst);
+        visited.insert(usedInst);
+        condRelatedInsts.insert(usedInst);
+      }
+    }
+  }
+}
+
+void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
   Loop *L = LP->L;
   // print loop body
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
-    errs() << "trying to print BB: " << BB->getName() << "\n";
     // Don't print Loop latch any more
     BasicBlock *skipBlock = nullptr;
     if(L->getBlocks().size() > 1)
@@ -5654,9 +5682,6 @@ void CWriter::printLoopBody(ForLoopProfile *LP){
           if(skipHeader)
             continue;
         }
-        std::set<Value*> skipInsts;
-        if(LP->incr)
-          skipInsts.insert(LP->incr);
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
@@ -5700,12 +5725,43 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
   }
 }
 
-void CWriter::FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print){
+void CWriter::searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks){
+   BasicBlock *skipBlock = nullptr;
+   if(L->getBlocks().size() > 1){
+     skipBlock = findDoWhileExitingLatchBlock(L);
+     skipBlocks.insert(skipBlock);
+   }
+
+   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+     BasicBlock *BB = L->getBlocks()[i];
+     if(BB == L->getHeader()){
+	     for (auto succ = succ_begin(BB); succ != succ_end(BB); ++succ){
+         BasicBlock* succBB = *succ;
+         if(skipBlock && succBB == skipBlock){
+           skipBlocks.insert(BB);
+           return;
+         }
+       }
+     }
+   }
+}
+
+void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2Print){
   Instruction *inst = dyn_cast<Instruction>(val);
   if(!inst) return;
 
-  if(!isDirectAlloca(inst))
+  bool isLiveIn = true;
+  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+    BasicBlock *BB = L->getBlocks()[i];
+    if(BB == inst->getParent()) {
+      isLiveIn = false;
+      break;
+    }
+  }
+
+  if(!isDirectAlloca(inst) && isLiveIn){
     insts2Print.insert(inst);
+  }
 
 
   std::queue<Instruction*> toVisit;
@@ -5718,7 +5774,19 @@ void CWriter::FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print){
 
     for(Value *opnd : currInst->operands()){
       Instruction *usedInst = dyn_cast<Instruction>(opnd);
-      if(usedInst && visited.find(usedInst) == visited.end()
+      if(!usedInst) continue;
+
+      bool skipInst = false;
+      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+        BasicBlock *BB = L->getBlocks()[i];
+        if(BB == usedInst->getParent()){
+          skipInst = true;
+          break;
+        }
+      }
+      if(skipInst) continue;
+
+      if(visited.find(usedInst) == visited.end()
         && !isDirectAlloca(usedInst)){
         toVisit.push(usedInst);
         insts2Print.insert(usedInst);
@@ -5727,10 +5795,26 @@ void CWriter::FindLiveInsFor(Value *val, std::set<Instruction*> &insts2Print){
     }
 
     for(User *U : currInst->users()){
+      Instruction *userInst = dyn_cast<Instruction>(U);
+      if(!userInst) continue;
+
+      bool skipInst = false;
+      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+        BasicBlock *BB = L->getBlocks()[i];
+        if(BB == userInst->getParent()){
+          skipInst = true;
+          break;
+        }
+      }
+      if(skipInst) continue;
+
       if(StoreInst *store = dyn_cast<StoreInst>(U)){
-        toVisit.push(store);
-        insts2Print.insert(store);
-        visited.insert(store);
+        if(store->getPointerOperand() == cast<Value>(currInst)){
+          toVisit.push(store);
+          insts2Print.insert(store);
+          errs() << "SUSAN: inserting userInst: " << *userInst << "\n";
+          visited.insert(store);
+        }
       }
     }
   }
@@ -5760,10 +5844,19 @@ void CWriter::printLoopNew(Loop *L) {
 
     if(LP->isOmpLoop){
       condInst = findCondInst(L, negateCondition, true);
-      // print live-ins
+
+      //print loop liveins
       std::set<Instruction*> insts2Print;
-      FindLiveInsFor(LP->lb, insts2Print);
-      FindLiveInsFor(LP->ub, insts2Print);
+      std::set<BasicBlock*> skipBlocks;
+      searchForBlocksToSkip(L, skipBlocks);
+      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+        BasicBlock *BB = L->getBlocks()[i];
+        if(skipBlocks.find(BB) != skipBlocks.end()) continue;
+        for(auto &I : *BB)
+          FindLiveInsFor(L, &I, insts2Print);
+      }
+      FindLiveInsFor(L, LP->lb, insts2Print);
+      FindLiveInsFor(L, LP->ub, insts2Print);
       Function *F = header->getParent();
       for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
         if(insts2Print.find(&*I) != insts2Print.end())
@@ -5772,6 +5865,18 @@ void CWriter::printLoopNew(Loop *L) {
       Out << "#pragma omp for\n";
     }
 
+    std::set<Value*> condRelatedInsts;
+    BasicBlock *condBlock = condInst->getParent();
+    findCondRelatedInsts(condBlock, condRelatedInsts);
+    for(auto condRelatedInst : condRelatedInsts){
+      Instruction *inst = cast<Instruction>(condRelatedInst);
+      if(isa<PHINode>(inst) || isa<BranchInst>(inst)
+          || isa<CmpInst>(inst) || isInlinableInst(*inst)
+          || inst == LP->incr) continue;
+      printInstruction(inst);
+    }
+
+    //print not inlinable insts that's used for loop cond
     Out << "for(";
     Value *initVal, *ub, *incr;
     errs() << "SUSAN: found for loop profile:\n";
@@ -5815,7 +5920,7 @@ void CWriter::printLoopNew(Loop *L) {
     }
 
     errs() << "SUSAN: printing loop body for" << *LP->L << "\n";
-    printLoopBody(LP);
+    printLoopBody(LP, condRelatedInsts);
 
     Out << "}\n";
 
@@ -7568,7 +7673,6 @@ void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function
     for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i) {
       Value *opnd = inst->getOperand(i);
       if(values2delete.find(opnd) != values2delete.end()){
-        errs() << "SUSAN: don't print inst: " << *inst << "\n";
         omp_SkipVals.insert(cast<Value>(inst));
       }
     }
