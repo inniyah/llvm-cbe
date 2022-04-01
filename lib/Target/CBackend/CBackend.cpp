@@ -175,7 +175,7 @@ bool CWriter::isAddressExposed(Value *V) const {
 bool CWriter::isInlinableInst(Instruction &I) const {
   // Always inline cmp instructions, even if they are shared by multiple
   // expressions.  GCC generates horrible code if we don't.
-  if (isa<CmpInst>(I) || isa<GetElementPtrInst>(I))
+  if (isa<LoadInst>(I) || isa<CmpInst>(I) || isa<GetElementPtrInst>(I))
     return true;
 
   //exit condition can be inlined
@@ -185,7 +185,8 @@ bool CWriter::isInlinableInst(Instruction &I) const {
   // Must be an expression, must be used exactly once.  If it is dead, we
   // emit it inline where it would go.
   if (isEmptyType(I.getType()) || !I.hasOneUse() || I.isTerminator() ||
-      isa<CallInst>(I) || isa<PHINode>(I) || isa<LoadInst>(I) ||
+      //isa<CallInst>(I) || isa<PHINode>(I) || isa<LoadInst>(I) ||
+      isa<CallInst>(I) || isa<PHINode>(I) ||
       isa<VAArgInst>(I) || isa<InsertElementInst>(I) || isa<InsertValueInst>(I))
     // Don't inline a load across a store or other bad things!
     return false;
@@ -885,7 +886,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
         if(isa<Constant>(phiVal))
           PHIValues2Print.insert(std::make_pair(predBB, phi));
         else if(Instruction *I = dyn_cast<Instruction>(phiVal)){
-          if(isInlinableInst(*I))
+          if(isInlinableInst(*I) && !isa<LoadInst>(*I))
             PHIValues2Print.insert(std::make_pair(predBB, phi));
           else if(isa<LoadInst>(I)){
             ldInst = cast<LoadInst>(I);
@@ -5759,7 +5760,7 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
     }
   }
 
-  if(!isDirectAlloca(inst) && isLiveIn){
+  if(!isDirectAlloca(inst) && !isInlinableInst(*inst) && isLiveIn){
     insts2Print.insert(inst);
   }
 
@@ -5787,7 +5788,7 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
       if(skipInst) continue;
 
       if(visited.find(usedInst) == visited.end()
-        && !isDirectAlloca(usedInst)){
+        && !isDirectAlloca(usedInst) && !isInlinableInst(*usedInst)){
         toVisit.push(usedInst);
         insts2Print.insert(usedInst);
         visited.insert(usedInst);
@@ -5809,7 +5810,7 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
       if(skipInst) continue;
 
       if(StoreInst *store = dyn_cast<StoreInst>(U)){
-        if(store->getPointerOperand() == cast<Value>(currInst)){
+        if(store->getPointerOperand() == cast<Value>(currInst) && !isInlinableInst(*userInst)){
           toVisit.push(store);
           insts2Print.insert(store);
           errs() << "SUSAN: inserting userInst: " << *userInst << "\n";
@@ -5873,6 +5874,7 @@ void CWriter::printLoopNew(Loop *L) {
       if(isa<PHINode>(inst) || isa<BranchInst>(inst)
           || isa<CmpInst>(inst) || isInlinableInst(*inst)
           || inst == LP->incr) continue;
+      errs() << "SUSAN: printing condRelatedInst: " << *inst << "\n";
       printInstruction(inst);
     }
 
