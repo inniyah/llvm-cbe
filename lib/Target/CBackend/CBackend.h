@@ -119,7 +119,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<ForLoopProfile*> ompLoops;
   std::set<GetElementPtrInst*> GEPNeedsReference;
   std::set<Value*>skipInstsForPhis;
-  std::map<PHINode*, Value*>phis2print;
+  std::map<PHINode*, LoadInst*>phis2print;
 
   CBERegion topRegion;
 

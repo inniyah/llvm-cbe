@@ -910,7 +910,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
       if(ldPtr && stPtr && ldPtr == stPtr){
         skipInstsForPhis.insert(cast<Instruction>(ldInst));
         skipInstsForPhis.insert(cast<Instruction>(stInst));
-        phis2print[phi] = ldPtr;
+        phis2print[phi] = ldInst;
       }
 
     }
