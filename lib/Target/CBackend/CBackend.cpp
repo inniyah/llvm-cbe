@@ -171,7 +171,7 @@ Type *CWriter::skipEmptyArrayTypes(Type *Ty) const {
 /// This happens for global variables, byval parameters, and direct allocas.
 bool CWriter::isAddressExposed(Value *V) const {
   if (Argument *A = dyn_cast<Argument>(V))
-    return ByValParams.count(A) > 0;
+    return A->hasByValAttr();
   else
     return isa<GlobalVariable>(V) || isDirectAlloca(V);
 }
@@ -4239,7 +4239,6 @@ bool CWriter::doFinalization(Module &M) {
   MOFI = nullptr;
 
   FPConstantMap.clear();
-  ByValParams.clear();
   AnonValueNumbers.clear();
   UnnamedStructIDs.clear();
   UnnamedFunctionIDs.clear();

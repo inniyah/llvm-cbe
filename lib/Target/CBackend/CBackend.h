@@ -172,7 +172,6 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   const Loop *CurLoop = nullptr;
 
   IDMap<const ConstantFP *> FPConstantMap;
-  std::set<const Argument *> ByValParams;
 
   IDMap<const Value *> AnonValueNumbers;
 
