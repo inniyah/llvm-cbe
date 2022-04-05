@@ -121,6 +121,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Value*>skipInstsForPhis;
   std::map<PHINode*, LoadInst*>phis2print;
   std::set<Instruction*> omp_liveins;
+  std::set<Instruction*> omp_declaredLocals;
 
   CBERegion topRegion;
 
@@ -373,7 +374,7 @@ private:
   void FindLiveInsFor(Loop *L, Value *val, std::set<Instruction*> &insts2Print);
   void searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks);
   void findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts);
-  void DeclareLocalVariable(Instruction *I, bool &PrintedVar);
+  void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared);
   void OMP_RecordLiveIns(ForLoopProfile *LP);
 
 

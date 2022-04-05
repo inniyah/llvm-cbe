@@ -5079,10 +5079,7 @@ void CWriter::insertDeclaredInsts(Instruction* I){
     declaredInsts.insert(I);
 }
 
-void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar){
-   errs() << "SUSAN: trying to declare: " << *I << "\n";
-   if(isInlinableInst(*I))
-     errs() << "SUSAN: is inlinable\n";
+void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared){
 
    std::set<std::string> declaredLocals;
    if (AllocaInst *AI = isDirectAlloca(I)) {
@@ -5117,6 +5114,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar){
 
      Out << ";    /* Address-exposed local */\n";
      PrintedVar = true;
+     isDeclared = true;
    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
        auto varName = GetValueName(I);
@@ -5147,6 +5145,8 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar){
 
      }
 
+     PrintedVar = true;
+     isDeclared = true;
     // if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(I, true)) { // Print out PHI node temporaries as well...
     //   Out << "  ";
 
@@ -5174,7 +5174,6 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar){
     //   // Shouldn't need this code here but in case there exists empty phi
     //   insertDeclaredInsts(&*I);
     // }
-     PrintedVar = true;
    }
    // We need a temporary for the BitCast to use so it can pluck a value out
    // of a union to do the BitCast. This is separate from the need for a
@@ -5486,9 +5485,10 @@ void CWriter::printFunction(Function &F) {
         signedInsts.insert(inst2var.first);
 
   // print local variable information for the function
+  bool isDeclared = false;
   if(!IS_OPENMP_FUNCTION)
      for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
-       DeclareLocalVariable(&*I, PrintedVar);
+       DeclareLocalVariable(&*I, PrintedVar, isDeclared);
 
   if (PrintedVar)
     Out << '\n';
@@ -5519,13 +5519,18 @@ void CWriter::printFunction(Function &F) {
           if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
-          DeclareLocalVariable(inst, PrintedVar);
+          bool isDeclared = false;
+          DeclareLocalVariable(inst, PrintedVar, isDeclared);
+          if(isDeclared) omp_declaredLocals.insert(inst);
         }
       }
     }
 
-    for(auto I : omp_liveins)
-      DeclareLocalVariable(I, PrintedVar);
+    for(auto I : omp_liveins){
+      bool isDeclared = false;
+      DeclareLocalVariable(I, PrintedVar, isDeclared);
+      if(isDeclared) omp_declaredLocals.insert(I);
+    }
 
     for(auto LP : ompLoops)
       printLoopNew(LP->L);
@@ -5912,7 +5917,33 @@ void CWriter::printLoopNew(Loop *L) {
       for(auto I : omp_liveins)
         printInstruction(I);
 
-      Out << "#pragma omp for\n";
+      Out << "#pragma omp for";
+
+      //find if there are private variables
+      bool printPrivate = true;
+      bool printComma = false;
+      for(auto inst : omp_declaredLocals){
+        errs() << "SUSAN: printing local in private: " << *inst << "\n";
+        errs() << "LP->IV: " << LP->IV << "\n";
+        if(inst == LP->IV ||
+            (isIVIncrement(cast<Value>(inst)) &&
+            LI->getLoopFor(inst->getParent())==LP->L)){
+          printComma = false;
+          continue;
+        }
+        if(printComma) Out << ", ";
+        if(printPrivate){
+          printPrivate = false;
+          Out << " private( ";
+        }
+        writeOperand(cast<Value>(inst));
+        printComma = true;
+      }
+
+      if(!printPrivate)
+        Out << ")";
+
+      Out << "\n";
     }
 
     std::set<Value*> condRelatedInsts;
