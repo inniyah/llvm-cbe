@@ -5506,10 +5506,20 @@ void CWriter::printFunction(Function &F) {
     //find all the local variables to declare
     for(auto LP : ompLoops){
       Loop *L = LP->L;
+      std::set<Value*> skipInsts;
+      bool negateCondition;
+      Instruction *condInst = findCondInst(L, negateCondition, true);
+      BasicBlock *condBlock = condInst->getParent();
+      findCondRelatedInsts(condBlock, skipInsts);
       for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
         BasicBlock *BB = L->getBlocks()[i];
         for(auto &I : *BB){
-          DeclareLocalVariable(&I, PrintedVar);
+          Instruction *inst = &I;
+          if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
+          if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
+          if(dyn_cast<PHINode>(inst)) continue;
+          if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
+          DeclareLocalVariable(inst, PrintedVar);
         }
       }
     }
@@ -6127,7 +6137,7 @@ if( NATURAL_CONTROL_FLOW ){
     if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
     if(dyn_cast<PHINode>(inst)) continue;
 
-    if(skipInsts.find(cast<Value>(&*II)) != skipInsts.end()) continue;
+    if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
