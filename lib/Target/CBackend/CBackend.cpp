@@ -957,6 +957,13 @@ void CWriter::omp_preprossesing(Function &F){
           initCI = CI;
           omp_SkipVals.insert(cast<Value>(CI));
           lb = CI->getArgOperand(4);
+
+          // find the value stored into lb
+          for(User *U : lb->users()){
+            if(StoreInst *store = dyn_cast<StoreInst>(U))
+              lb = store->getOperand(0);
+          }
+
           ub = findOriginalUb(F, CI->getArgOperand(5));
           incr = CI->getArgOperand(7);
         }
@@ -5072,6 +5079,114 @@ void CWriter::insertDeclaredInsts(Instruction* I){
     declaredInsts.insert(I);
 }
 
+void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar){
+   errs() << "SUSAN: trying to declare: " << *I << "\n";
+   if(isInlinableInst(*I))
+     errs() << "SUSAN: is inlinable\n";
+
+   std::set<std::string> declaredLocals;
+   if (AllocaInst *AI = isDirectAlloca(I)) {
+     auto varName = GetValueName(AI);
+     if(declaredLocals.find(varName) != declaredLocals.end()) return;
+     declaredLocals.insert(varName);
+
+     Out << "  ";
+
+     bool printedType = false;
+     for(auto [sextInst, inst] : declareAsCastedType)
+       if(inst == I){
+         printTypeNameForAddressableValue(Out, sextInst->getType(), true);
+         printedType = true;
+         break;
+       }
+
+     if(!printedType){
+       if(signedInsts.find(I) != signedInsts.end())
+         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
+       else
+         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+     }
+
+     Out << ' ' << varName;
+
+     ArrayType *ArrTy = dyn_cast<ArrayType>(AI->getAllocatedType());
+     while(ArrTy){
+       Out << "[" << ArrTy->getNumElements() << "]";
+       ArrTy = dyn_cast<ArrayType>(ArrTy->getElementType());
+     }
+
+     Out << ";    /* Address-exposed local */\n";
+     PrintedVar = true;
+   } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
+     if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
+       auto varName = GetValueName(I);
+       if(declaredLocals.find(varName) != declaredLocals.end()) return;
+       declaredLocals.insert(varName);
+
+       errs() << "SUSAN: declaring " << *I << "\n";
+       Out << "  ";
+
+       bool printedType = false;
+       for(auto [sextInst, inst] : declareAsCastedType)
+         if(inst == I){
+           printTypeName(Out, sextInst->getType(), true) << ' ' << varName;
+           printedType = true;
+           break;
+         }
+
+       if(!printedType){
+         if(signedInsts.find(I) != signedInsts.end())
+           printTypeName(Out, I->getType(), true) << ' ' << varName;
+         else
+           printTypeName(Out, I->getType(), false) << ' ' << varName;
+       }
+
+       Out << ";\n";
+
+       insertDeclaredInsts(I);
+
+     }
+
+    // if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(I, true)) { // Print out PHI node temporaries as well...
+    //   Out << "  ";
+
+    //   bool printedType = false;
+    //   for(auto [sextInst, inst] : declareAsCastedType)
+    //     if(inst == &*I){
+    //       printTypeName(Out, sextInst->getType(), true)
+    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+    //       printedType = true;
+    //       break;
+    //     }
+
+    //   if(!printedType){
+    //     if(signedInsts.find(&*I) != signedInsts.end())
+    //       printTypeName(Out, I->getType(), true)
+    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+    //     else
+    //       printTypeName(Out, I->getType(), false)
+    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
+    //   }
+
+    //   Out << ";\n";
+
+    //   // all the insts associated with this variable counts as declared
+    //   // Shouldn't need this code here but in case there exists empty phi
+    //   insertDeclaredInsts(&*I);
+    // }
+     PrintedVar = true;
+   }
+   // We need a temporary for the BitCast to use so it can pluck a value out
+   // of a union to do the BitCast. This is separate from the need for a
+   // variable to hold the result of the BitCast.
+   if (isFPIntBitCast(*I)) {
+     headerUseBitCastUnion();
+     Out << "  llvmBitCastUnion " << GetValueName(I)
+         << "__BITCAST_TEMPORARY;\n";
+     PrintedVar = true;
+   }
+}
+
 void CWriter::printFunction(Function &F) {
 
   //SUSAN: collect function argument reference depths
@@ -5370,120 +5485,41 @@ void CWriter::printFunction(Function &F) {
       if(inst2var.second == signedVar)
         signedInsts.insert(inst2var.first);
 
-  std::set<std::string> declaredLocals;
   // print local variable information for the function
-  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
-    if (AllocaInst *AI = isDirectAlloca(&*I)) {
-      auto varName = GetValueName(AI);
-      if(declaredLocals.find(varName) != declaredLocals.end()) continue;
-      declaredLocals.insert(varName);
-
-      Out << "  ";
-
-      bool printedType = false;
-      for(auto [sextInst, inst] : declareAsCastedType)
-        if(inst == &*I){
-          printTypeNameForAddressableValue(Out, sextInst->getType(), true);
-          printedType = true;
-          break;
-        }
-
-      if(!printedType){
-        if(signedInsts.find(&*I) != signedInsts.end())
-          printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
-        else
-          printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
-      }
-
-      Out << ' ' << varName;
-
-      ArrayType *ArrTy = dyn_cast<ArrayType>(AI->getAllocatedType());
-      while(ArrTy){
-        Out << "[" << ArrTy->getNumElements() << "]";
-        ArrTy = dyn_cast<ArrayType>(ArrTy->getElementType());
-      }
-
-      Out << ";    /* Address-exposed local */\n";
-      PrintedVar = true;
-    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
-      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(&*I, false)) {
-        auto varName = GetValueName(&*I);
-        if(declaredLocals.find(varName) != declaredLocals.end()) continue;
-        declaredLocals.insert(varName);
-
-        errs() << "SUSAN: declaring " << *I << "\n";
-        Out << "  ";
-
-        bool printedType = false;
-        for(auto [sextInst, inst] : declareAsCastedType)
-          if(inst == &*I){
-            printTypeName(Out, sextInst->getType(), true) << ' ' << varName;
-            printedType = true;
-            break;
-          }
-
-        if(!printedType){
-          if(signedInsts.find(&*I) != signedInsts.end())
-            printTypeName(Out, I->getType(), true) << ' ' << varName;
-          else
-            printTypeName(Out, I->getType(), false) << ' ' << varName;
-        }
-
-        Out << ";\n";
-
-        insertDeclaredInsts(&*I);
-
-      }
-
-      if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(&*I, true)) { // Print out PHI node temporaries as well...
-        Out << "  ";
-
-        bool printedType = false;
-        for(auto [sextInst, inst] : declareAsCastedType)
-          if(inst == &*I){
-            printTypeName(Out, sextInst->getType(), true)
-              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-            printedType = true;
-            break;
-          }
-
-        if(!printedType){
-          if(signedInsts.find(&*I) != signedInsts.end())
-            printTypeName(Out, I->getType(), true)
-              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-          else
-            printTypeName(Out, I->getType(), false)
-              << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-        }
-
-        Out << ";\n";
-
-        // all the insts associated with this variable counts as declared
-        // Shouldn't need this code here but in case there exists empty phi
-        insertDeclaredInsts(&*I);
-      }
-      PrintedVar = true;
-    }
-    // We need a temporary for the BitCast to use so it can pluck a value out
-    // of a union to do the BitCast. This is separate from the need for a
-    // variable to hold the result of the BitCast.
-    if (isFPIntBitCast(*I)) {
-      headerUseBitCastUnion();
-      Out << "  llvmBitCastUnion " << GetValueName(&*I)
-          << "__BITCAST_TEMPORARY;\n";
-      PrintedVar = true;
-    }
-  }
+  if(!IS_OPENMP_FUNCTION)
+     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
+       DeclareLocalVariable(&*I, PrintedVar);
 
   if (PrintedVar)
     Out << '\n';
 
   std::set<BasicBlock*> delayedBBs;
-  // print the basic blocks
+
+  /*
+   * OpenMP:
+   * Record Liveins
+   * Only prints the loop
+   */
   if(IS_OPENMP_FUNCTION){
     for(auto LP : ompLoops)
+      OMP_RecordLiveIns(LP);
+    //find all the local variables to declare
+    for(auto LP : ompLoops){
+      Loop *L = LP->L;
+      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+        BasicBlock *BB = L->getBlocks()[i];
+        for(auto &I : *BB){
+          DeclareLocalVariable(&I, PrintedVar);
+        }
+      }
+    }
+
+    for(auto I : omp_liveins)
+      DeclareLocalVariable(I, PrintedVar);
+
+    for(auto LP : ompLoops)
       printLoopNew(LP->L);
-  } else {
+  } else { // print basic blocks
     std::queue<BasicBlock*> toVisit;
     std::set<BasicBlock*> visited;
     toVisit.push(&F.getEntryBlock());
@@ -5821,6 +5857,20 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
   }
 }
 
+void CWriter::OMP_RecordLiveIns(ForLoopProfile *LP){
+   Loop *L = LP->L;
+   std::set<BasicBlock*> skipBlocks;
+   searchForBlocksToSkip(L, skipBlocks);
+   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+     BasicBlock *BB = L->getBlocks()[i];
+     if(skipBlocks.find(BB) != skipBlocks.end()) continue;
+     for(auto &I : *BB)
+       FindLiveInsFor(L, &I, omp_liveins);
+   }
+   FindLiveInsFor(L, LP->lb, omp_liveins);
+   FindLiveInsFor(L, LP->ub, omp_liveins);
+}
+
 void CWriter::printLoopNew(Loop *L) {
   // FIXME: assume all omp loops are for loops
 
@@ -5833,8 +5883,6 @@ void CWriter::printLoopNew(Loop *L) {
     errs() << "SUSAN: loop block: " << BB->getName() << "\n";
   }
 
-
-
   BasicBlock *header = L->getHeader();
   bool negateCondition = false;
   Instruction *condInst = findCondInst(L, negateCondition);
@@ -5846,22 +5894,13 @@ void CWriter::printLoopNew(Loop *L) {
     if(LP->isOmpLoop){
       condInst = findCondInst(L, negateCondition, true);
 
+      //Function *F = header->getParent();
       //print loop liveins
-      std::set<Instruction*> insts2Print;
-      std::set<BasicBlock*> skipBlocks;
-      searchForBlocksToSkip(L, skipBlocks);
-      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
-        BasicBlock *BB = L->getBlocks()[i];
-        if(skipBlocks.find(BB) != skipBlocks.end()) continue;
-        for(auto &I : *BB)
-          FindLiveInsFor(L, &I, insts2Print);
-      }
-      FindLiveInsFor(L, LP->lb, insts2Print);
-      FindLiveInsFor(L, LP->ub, insts2Print);
-      Function *F = header->getParent();
-      for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
-        if(insts2Print.find(&*I) != insts2Print.end())
-          printInstruction(&*I);
+  //   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
+  //      if(omp_liveins.find(&*I) != omp_liveins.end())
+  //        printInstruction(&*I);
+      for(auto I : omp_liveins)
+        printInstruction(I);
 
       Out << "#pragma omp for\n";
     }
