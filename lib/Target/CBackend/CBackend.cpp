@@ -5719,8 +5719,10 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
     skipBlock = findDoWhileExitingLatchBlock(L);
 
   std::set<Instruction*> InstsKeptFromSkipBlock;
-  if(skipBlock)
+  if(skipBlock){
     keepIVUnrelatedInsts(skipBlock, InstsKeptFromSkipBlock);
+    errs() << "SUSAN: skip Block:" << skipBlock->getName() << "\n";
+  }
 
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
@@ -5749,6 +5751,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
     } else {
       for(auto I : InstsKeptFromSkipBlock)
         printInstruction(I);
+      times2bePrinted[skipBlock]--;
     }
   }
 
