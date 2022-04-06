@@ -6976,10 +6976,11 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     } else {
       opcode = I.getOpcode();
       if(opcode == Instruction::Add || opcode == Instruction::FAdd){
-        //Out << "(";
+        Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " + ";
         writeOperand(I.getOperand(1), ContextCasted);
+        Out << ")";
       }
       else if(opcode == Instruction::Mul || opcode == Instruction::FMul){
         //Out << "(";
@@ -7019,10 +7020,11 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::Sub || opcode == Instruction::FSub){
-        //Out << "(";
+        Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " - ";
         writeOperand(I.getOperand(1), ContextCasted);
+        Out << ")";
       }
       else if(opcode == Instruction::UDiv || opcode == Instruction::FDiv){
         //Out << "(";
@@ -7135,6 +7137,11 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     // Certain instructions require the operand to be forced to a specific type
     // so we use writeOperandWithCast here instead of writeOperand. Similarly
     // below for operand 1
+    if(I.getOpcode() == Instruction::Add
+        || I.getOpcode() == Instruction::FAdd
+        || I.getOpcode() == Instruction::Sub
+        || I.getOpcode() == Instruction::FSub)
+      Out << "(";
     writeOperandWithCast(I.getOperand(0), I.getOpcode());
 
     switch (I.getOpcode()) {
@@ -7182,6 +7189,11 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     }
 
     writeOperandWithCast(I.getOperand(1), I.getOpcode());
+    if(I.getOpcode() == Instruction::Add
+        || I.getOpcode() == Instruction::FAdd
+        || I.getOpcode() == Instruction::Sub
+        || I.getOpcode() == Instruction::FSub)
+      Out << ")";
     if (NeedsClosingParens)
       Out << "))";
   }
