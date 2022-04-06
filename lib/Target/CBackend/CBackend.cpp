@@ -585,7 +585,7 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
 
   if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
     Type *nextTy = ptrTy->getPointerElementType();
-    if(isa<IntegerType>(nextTy)){
+    if(isa<IntegerType>(nextTy) || nextTy->isFloatTy() || nextTy->isDoubleTy()){
       Times2Dereference[UO]++;
       return;
     }
@@ -8445,6 +8445,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
   //first index
   if(isa<StructType>(IntoT) || isa<ArrayType>(IntoT)){
     //if it's a struct or array, whether it's pointer or not, first index is offset and zero can be eliminated
+    errs() <<  "SUSAN: first index is struct or array type\n";
     if(!isConstantNull(FirstOp)){
       Out << '(';
       writeOperandInternal(Ptr, ContextNormal, false);
@@ -8464,6 +8465,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     }
   }
   else if(isa<IntegerType>(IntoT) || isa<PointerType>(IntoT) || IntoT->isDoubleTy() || IntoT->isFloatTy()){
+    errs() <<  "SUSAN: first index is integer/pointertype type\n";
     //if indexed type is an integer, it means accessing an array, or a block of allocated memory
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
