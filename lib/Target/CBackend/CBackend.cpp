@@ -883,36 +883,13 @@ void CWriter::preprossesPHIs2Print(Function &F){
       for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
         BasicBlock *predBB = phi->getIncomingBlock(i);
         Value *phiVal = phi->getIncomingValue(i);
-        if(isa<Constant>(phiVal))
+        if(isa<Constant>(phiVal) || isa<LoadInst>(phiVal)){
           PHIValues2Print.insert(std::make_pair(predBB, phi));
-        else if(Instruction *I = dyn_cast<Instruction>(phiVal)){
-          if(isInlinableInst(*I) && !isa<LoadInst>(*I))
-            PHIValues2Print.insert(std::make_pair(predBB, phi));
-          else if(isa<LoadInst>(I)){
-            ldInst = cast<LoadInst>(I);
-            ldPtr = ldInst->getPointerOperand();
-          }
-          else if(isa<StoreInst>(I)){
-            stInst = cast<StoreInst>(I);
-            stPtr = stInst->getPointerOperand();
-          } else {
-           for(User *U : I->users()){
-            if(isa<StoreInst>(U)){
-              stInst = cast<StoreInst>(U);
-              stPtr = stInst->getPointerOperand();
-            }
-           }
-          }
-
+        }
+        else if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
+          InstsToReplaceByPhi[phiVal] = phi;
         }
       }
-
-      if(ldPtr && stPtr && ldPtr == stPtr){
-        skipInstsForPhis.insert(cast<Instruction>(ldInst));
-        //skipInstsForPhis.insert(cast<Instruction>(stInst));
-        phis2print[phi] = ldInst;
-      }
-
     }
 }
 
@@ -2570,6 +2547,10 @@ std::string demangleVariableName(StringRef var){
   return newVar;
 }
 std::string CWriter::GetValueName(Value *Operand) {
+  //SUSAN: variable names associated with phi will be replaced by phi
+  if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
+    return GetValueName(InstsToReplaceByPhi[Operand]);
+
   //SUSAN: where the vairable names are printed
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for(auto inst2var : IRNaming)
@@ -2674,11 +2655,15 @@ void CWriter::writeOperandInternal(Value *Operand,
 }
 
 void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool startExpression) {
-  if(PHINode *phi = dyn_cast<PHINode>(Operand)){
+  /*if(PHINode *phi = dyn_cast<PHINode>(Operand)){
     if(phis2print.find(phi) != phis2print.end()){
       writeOperand(phis2print[phi]);
       return;
     }
+  }*/
+  if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
+    writeOperand(InstsToReplaceByPhi[Operand]);
+    return;
   }
 
   bool isAddressImplicit = isAddressExposed(Operand);
@@ -5620,8 +5605,21 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
       Out << ";\n";
 }
 
+void CWriter::keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock){
+  for(auto &I : *skipBB){
+    if(isa<BranchInst>(&I) || isIVIncrement(cast<Value>(&I))) continue;
+    bool skipIVRelated = false;
+    for(User *U : I.users())
+      if(isIVIncrement(U) || isa<BranchInst>(U)){
+        skipIVRelated = true;
+        break;
+      }
+    if(skipIVRelated) continue;
+    InstsKeptFromSkipBlock.insert(&I);
+  }
+}
 
-BasicBlock *findDoWhileExitingLatchBlock(Loop *L){
+BasicBlock* findDoWhileExitingLatchBlock(Loop *L){
   SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
@@ -5631,7 +5629,8 @@ BasicBlock *findDoWhileExitingLatchBlock(Loop *L){
     BasicBlock *exit = *i;
     Instruction* term = exit->getTerminator();
     BranchInst* brInst = dyn_cast<BranchInst>(term);
-    if(L->isLoopLatch(exit)) return exit;
+    if(L->isLoopLatch(exit))
+     return exit;
   }
   return nullptr;
 }
@@ -5713,13 +5712,19 @@ void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &cond
 void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
   Loop *L = LP->L;
   // print loop body
+
+  // Don't print Loop latch any more
+  BasicBlock *skipBlock = nullptr;
+  if(L->getBlocks().size() > 1)
+    skipBlock = findDoWhileExitingLatchBlock(L);
+
+  std::set<Instruction*> InstsKeptFromSkipBlock;
+  if(skipBlock)
+    keepIVUnrelatedInsts(skipBlock, InstsKeptFromSkipBlock);
+
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     Loop *BBLoop = LI->getLoopFor(BB);
-    // Don't print Loop latch any more
-    BasicBlock *skipBlock = nullptr;
-    if(L->getBlocks().size() > 1)
-      skipBlock = findDoWhileExitingLatchBlock(L);
     if(BB != skipBlock){
       if (BBLoop == L){
         if(BB == L->getHeader()){
@@ -5741,8 +5746,13 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
         if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
         else printLoop(BBLoop);
       }
+    } else {
+      for(auto I : InstsKeptFromSkipBlock)
+        printInstruction(I);
     }
   }
+
+
 }
 
 void CWriter::initializeLoopPHIs(Loop *L){
@@ -5985,7 +5995,6 @@ void CWriter::printLoopNew(Loop *L) {
       writeOperand(condInst);
       if(negateCondition)
         Out << ")";
-
     }
 
     Out << ";";

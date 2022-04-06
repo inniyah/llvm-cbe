@@ -119,7 +119,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<ForLoopProfile*> ompLoops;
   std::set<GetElementPtrInst*> GEPNeedsReference;
   std::set<Value*>skipInstsForPhis;
-  std::map<PHINode*, LoadInst*>phis2print;
+  std::map<PHINode*, std::set<Value*>>phis2print;
+  std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::set<Instruction*> omp_liveins;
   std::set<Instruction*> omp_declaredLocals;
 
@@ -376,6 +377,7 @@ private:
   void findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts);
   void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared);
   void OMP_RecordLiveIns(ForLoopProfile *LP);
+  void keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock);
 
 
   void writeOperandDeref(Value *Operand);
