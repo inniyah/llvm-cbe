@@ -5507,7 +5507,7 @@ void CWriter::printFunction(Function &F) {
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           bool isDeclared = false;
           DeclareLocalVariable(inst, PrintedVar, isDeclared);
-          if(isDeclared) omp_declaredLocals.insert(inst);
+          if(isDeclared) omp_declaredLocals[L].insert(inst);
         }
       }
     }
@@ -5516,7 +5516,7 @@ void CWriter::printFunction(Function &F) {
       for(auto I : omp_liveins[LP->L]){
         bool isDeclared = false;
         DeclareLocalVariable(I, PrintedVar, isDeclared);
-        if(isDeclared) omp_declaredLocals.insert(I);
+        if(isDeclared) omp_declaredLocals[LP->L].insert(I);
       }
 
     for(auto LP : ompLoops)
@@ -5933,12 +5933,6 @@ void CWriter::printLoopNew(Loop *L) {
 
     if(LP->isOmpLoop){
       condInst = findCondInst(L, negateCondition, true);
-
-      //Function *F = header->getParent();
-      //print loop liveins
-  //   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
-  //      if(omp_liveins.find(&*I) != omp_liveins.end())
-  //        printInstruction(&*I);
       for(auto I : omp_liveins[L])
         printInstruction(I);
 
@@ -5947,7 +5941,7 @@ void CWriter::printLoopNew(Loop *L) {
       //find if there are private variables
       bool printPrivate = true;
       bool printComma = false;
-      for(auto inst : omp_declaredLocals){
+      for(auto inst : omp_declaredLocals[LP->L]){
         errs() << "SUSAN: printing local in private: " << *inst << "\n";
         errs() << "LP->IV: " << LP->IV << "\n";
         if(inst == LP->IV ||

@@ -122,7 +122,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<PHINode*, std::set<Value*>>phis2print;
   std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
-  std::set<Instruction*> omp_declaredLocals;
+  std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
 
   CBERegion topRegion;
 
