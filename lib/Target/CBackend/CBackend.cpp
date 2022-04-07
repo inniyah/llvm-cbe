@@ -893,13 +893,13 @@ void CWriter::preprossesPHIs2Print(Function &F){
     }
 }
 
-Value* findOriginalUb(Function &F, Value *ub){
+Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini){
   errs() << "SUSAN: ub: " << *ub << "\n";
+  bool startSearching = prevFini ? false : true;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
-    if(CallInst* CI = dyn_cast<CallInst>(&*I))
-      if(Function *ompInitCall = CI->getCalledFunction())
-        if(ompInitCall->getName().contains("__kmpc_for_static_init"))
-          break;
+    if(&*I == initCI) break;
+    if(&*I == prevFini) startSearching = true;
+    if(!startSearching) continue;
 
     if(StoreInst *store = dyn_cast<StoreInst>(&*I))
       if(store->getOperand(1) == ub){
@@ -919,69 +919,58 @@ void CWriter::omp_preprossesing(Function &F){
 
   //FIXME: currently only searching for the loop to be processed
 
-  //delete all the uses of first and second args of the function
-  //std::set<Value*> values2delete;
-  //values2delete.insert(cast<Value>(F.getArg(0)));
-  //values2delete.insert(cast<Value>(F.getArg(1)));
 
   //find __kmpc_for_static_init and associated loop info
   Value *lb, *ub, *incr;
   CallInst *initCI, *finiCI;
+  ForLoopProfile *currLP = nullptr;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *ompCall = CI->getCalledFunction()){
         if(ompCall->getName().contains("__kmpc_for_static_init")){
+          ForLoopProfile *ompLP = new ForLoopProfile();
           initCI = CI;
           omp_SkipVals.insert(cast<Value>(CI));
-          lb = CI->getArgOperand(4);
+
 
           // find the value stored into lb
+          lb = CI->getArgOperand(4);
           for(User *U : lb->users()){
             if(StoreInst *store = dyn_cast<StoreInst>(U))
               lb = store->getOperand(0);
           }
+          ompLP->lb = lb;
 
-          ub = findOriginalUb(F, CI->getArgOperand(5));
-          incr = CI->getArgOperand(7);
+          //find ub & incr
+          ompLP->ub = findOriginalUb(F, CI->getArgOperand(5), initCI, finiCI);
+          ompLP->incr = CI->getArgOperand(7);
+          ompLP->isOmpLoop = true;
+          currLP = ompLP;
         }
-        else if(ompCall->getName().contains("__kmpc_for_static_fini"))
+        else if(ompCall->getName().contains("__kmpc_for_static_fini")){
           finiCI = CI;
+          Loop *ompLoop = nullptr;
+          //find loop in between init and fini
+          for(auto &BB : F){
+            if(DT->dominates(initCI->getParent(), &BB)
+                && PDT->dominates(finiCI->getParent(), &BB)){
+              ompLoop = LI->getLoopFor(&BB);
+              if(ompLoop) break;
+            }
+          }
+          assert(ompLoop && "didn't find omp loop?\n");
+          errs() << "SUSAN: omploop:" << *ompLoop << "\n";
+          currLP->L = ompLoop;
+          currLP->IV = getInductionVariable(ompLoop, SE);
+          ompLoops.insert(currLP);
+        }
       }
     }
   }
 
-  Loop *ompLoop = nullptr;
-  //find loop in between init and fini
-  for(auto &BB : F){
-    if(DT->dominates(initCI->getParent(), &BB)
-        && PDT->dominates(finiCI->getParent(), &BB)){
-      ompLoop = LI->getLoopFor(&BB);
-      if(ompLoop) break;
-    }
-  }
 
-  assert(ompLoop && "didn't find omp loop?\n");
-  errs() << "SUSAN: omploop:" << *ompLoop << "\n";
 
-  CreateOmpLoops(ompLoop, ub, lb, incr);
-
-  //find loop live-in related instructions to keep
-  for (unsigned i = 0, e = ompLoop->getBlocks().size(); i != e; ++i) {
-    BasicBlock *BB = ompLoop->getBlocks()[i];
-    for(auto &inst : *BB){
-     if(isInductionVariable(cast<Value>(&inst))) continue;
-     if(isIVIncrement(cast<Value>(&inst))) continue;
-     bool negate;
-     if(&inst == findCondInst(ompLoop, negate)) continue;
-     for(Value *opnd : inst.operands()){
-       Instruction* inst = dyn_cast<Instruction>(opnd);
-       //errs() << "SUSAN: live in: " << *inst << "\n";
-       //if(inst && LI->getLoopFor(inst->getParent()) != ompLoop)
-         //assert(0 && "not implemented yet with live-ins!!\n");
-     }
-    }
-  }
-
+  //CreateOmpLoops(ompLoop, ub, lb, incr);
   //omp_searchForUsesToDelete(values2delete, F);
 }
 
