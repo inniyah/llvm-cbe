@@ -894,7 +894,6 @@ void CWriter::preprossesPHIs2Print(Function &F){
 }
 
 Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini){
-  errs() << "SUSAN: ub: " << *ub << "\n";
   bool startSearching = prevFini ? false : true;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(&*I == initCI) break;
@@ -907,11 +906,14 @@ Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFi
         if(subInst && (subInst->getOpcode() == Instruction::Add || subInst->getOpcode() == Instruction::FAdd)){
           if(ConstantInt *minusOne = dyn_cast<ConstantInt>(subInst->getOperand(1)))
             if(minusOne->getSExtValue() == -1){
-              return subInst->getOperand(0);
+              Value *opnd0 = subInst->getOperand(0);
+              if(LoadInst* ld = dyn_cast<LoadInst>(opnd0)) return ld->getPointerOperand();
+              else return opnd0;
             }
         }
       }
   }
+  errs() << "SUSAN: ub: " << *ub << "\n";
   return ub;
 }
 
@@ -923,6 +925,11 @@ void CWriter::omp_preprossesing(Function &F){
   //find __kmpc_for_static_init and associated loop info
   Value *lb, *ub, *incr;
   CallInst *initCI, *finiCI;
+  initCI = nullptr;
+  finiCI = nullptr;
+  lb = nullptr;
+  ub = nullptr;
+  incr = nullptr;
   ForLoopProfile *currLP = nullptr;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
@@ -5505,11 +5512,12 @@ void CWriter::printFunction(Function &F) {
       }
     }
 
-    for(auto I : omp_liveins){
-      bool isDeclared = false;
-      DeclareLocalVariable(I, PrintedVar, isDeclared);
-      if(isDeclared) omp_declaredLocals.insert(I);
-    }
+    for(auto LP : ompLoops)
+      for(auto I : omp_liveins[LP->L]){
+        bool isDeclared = false;
+        DeclareLocalVariable(I, PrintedVar, isDeclared);
+        if(isDeclared) omp_declaredLocals.insert(I);
+      }
 
     for(auto LP : ompLoops)
       printLoopNew(LP->L);
@@ -5809,7 +5817,8 @@ void CWriter::searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks){
    }
 }
 
-void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2Print){
+void CWriter::FindLiveInsFor(Loop* L, Value *val){
+  errs() << "SUSAN: finding liveins for Loop" << L->getHeader()->getName()<< "\n";
   Instruction *inst = dyn_cast<Instruction>(val);
   if(!inst) return;
 
@@ -5823,7 +5832,8 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
   }
 
   if(!isDirectAlloca(inst) && !isInlinableInst(*inst) && isLiveIn){
-    insts2Print.insert(inst);
+    errs() << "SUSAN: found livein" << *inst << "\n";
+    omp_liveins[L].insert(inst);
   }
 
 
@@ -5852,8 +5862,9 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
       if(visited.find(usedInst) == visited.end()
         && !isDirectAlloca(usedInst) && !isInlinableInst(*usedInst)){
         toVisit.push(usedInst);
-        insts2Print.insert(usedInst);
         visited.insert(usedInst);
+        errs() << "SUSAN: found livein at used" << *usedInst << "\n";
+        omp_liveins[L].insert(usedInst);
       }
     }
 
@@ -5874,9 +5885,9 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val, std::set<Instruction*> &insts2
       if(StoreInst *store = dyn_cast<StoreInst>(U)){
         if(store->getPointerOperand() == cast<Value>(currInst) && !isInlinableInst(*userInst)){
           toVisit.push(store);
-          insts2Print.insert(store);
-          errs() << "SUSAN: inserting userInst: " << *userInst << "\n";
           visited.insert(store);
+          errs() << "SUSAN: found livein at store" << *store << "\n";
+          omp_liveins[L].insert(store);
         }
       }
     }
@@ -5890,11 +5901,14 @@ void CWriter::OMP_RecordLiveIns(ForLoopProfile *LP){
    for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
      BasicBlock *BB = L->getBlocks()[i];
      if(skipBlocks.find(BB) != skipBlocks.end()) continue;
+     errs() << "SUSAN: finding live-in for" << BB->getName() << "\n";
      for(auto &I : *BB)
-       FindLiveInsFor(L, &I, omp_liveins);
+       FindLiveInsFor(L, &I);
    }
-   FindLiveInsFor(L, LP->lb, omp_liveins);
-   FindLiveInsFor(L, LP->ub, omp_liveins);
+   errs() << "SUSAN: finding live-in for lb" << *LP->lb << "\n";
+   FindLiveInsFor(L, LP->lb);
+   errs() << "SUSAN: finding live-in for ub" << *LP->ub << "\n";
+   FindLiveInsFor(L, LP->ub);
 }
 
 void CWriter::printLoopNew(Loop *L) {
@@ -5925,7 +5939,7 @@ void CWriter::printLoopNew(Loop *L) {
   //   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
   //      if(omp_liveins.find(&*I) != omp_liveins.end())
   //        printInstruction(&*I);
-      for(auto I : omp_liveins)
+      for(auto I : omp_liveins[L])
         printInstruction(I);
 
       Out << "#pragma omp for";
