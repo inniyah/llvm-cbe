@@ -4647,6 +4647,10 @@ void CWriter::markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs){
       bool negateCondition = false;
       if(L && L->getHeader() == &BB && headerIsExiting(L, negateCondition))
         continue;
+
+      //for loop latches
+      if(L && L->getLoopLatch() == &BB) continue;
+
       ifBranches.push_back(br);
     }
   }
@@ -5473,7 +5477,8 @@ void CWriter::printFunction(Function &F) {
   bool isDeclared = false;
   if(!IS_OPENMP_FUNCTION)
      for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
-       DeclareLocalVariable(&*I, PrintedVar, isDeclared);
+       if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end())
+        DeclareLocalVariable(&*I, PrintedVar, isDeclared);
 
   if (PrintedVar)
     Out << '\n';
@@ -5531,6 +5536,7 @@ void CWriter::printFunction(Function &F) {
         if (L->getHeader() == currBB
             && L->getParentLoop() == nullptr
             && times2bePrinted[currBB]) {
+          errs() << "SUSAN: printing loop " << currBB->getName() << " at 5538\n";
           if(NATURAL_CONTROL_FLOW)
             printLoopNew(L);
           else
@@ -5729,7 +5735,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
     Loop *BBLoop = LI->getLoopFor(BB);
     if(BB != skipBlock){
       if (BBLoop == L){
-        if(BB == L->getHeader()){
+        /*if(BB == L->getHeader()){
           bool skipHeader = false;
 	        for (auto succ = succ_begin(BB); succ != succ_end(BB); ++succ){
             BasicBlock* succBB = *succ;
@@ -5738,13 +5744,16 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
               break;
             }
           }
-          if(skipHeader)
+          if(skipHeader){
+            times2bePrinted[BB]--;
             continue;
-        }
+          }
+        }*/
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+        errs() << "SUSAN: printing loop " << BB->getName() << " at 5753\n";
         if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
         else printLoop(BBLoop);
       }
@@ -6091,6 +6100,7 @@ void CWriter::printLoopNew(Loop *L) {
         times2bePrinted[BB]--;
       }
       else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+        errs() << "SUSAN: printing loop " << BB->getName() << " at 6100\n";
         if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
         else printLoop(BBLoop);
       }
@@ -6647,6 +6657,11 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
               if(backedge.first == currBB && backedge.second  == succBB)
                 backEdgeDetected = true;
 
+            Loop *L = LI->getLoopFor(succBB);
+            if(L && L->getLoopLatch() == currBB){
+              errs() << "SUSAN: found latch" << currBB->getName() << "\n";
+              backEdgeDetected = true;
+            }
 
             if(!alreadyVisited && !backEdgeDetected){
               visitedNodes.insert(succBB);
@@ -6661,7 +6676,8 @@ void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
       if (Loop *L = LI->getLoopFor(bb)) {
-        if (L->getHeader() == bb && L->getParentLoop() == nullptr){
+        if (L->getHeader() == bb && L->getParentLoop() == nullptr && times2bePrinted[bb]){
+          errs() << "SUSAN: printing loop " << bb->getName() << " at 6677\n";
           if(NATURAL_CONTROL_FLOW)
             printLoopNew(L);
           else
