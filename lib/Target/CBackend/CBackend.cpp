@@ -2636,9 +2636,11 @@ void CWriter::writeOperandInternal(Value *Operand,
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
-      //Out << '(';
+      if(isa<LoadInst>(I))
+        Out << '(';
       writeInstComputationInline(*I, startExpression);
-      //Out << ')';
+      if(isa<LoadInst>(I))
+        Out << ')';
       return;
     }
 
@@ -5734,15 +5736,8 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
     if(BB != skipBlock){
       if (BBLoop == L){
         if(BB == L->getHeader()){
-          bool skipDoWhileCheck = false;
-	        for (auto succ = succ_begin(BB); succ != succ_end(BB); ++succ){
-            BasicBlock* succBB = *succ;
-            if(skipBlock && succBB == skipBlock){
-              skipDoWhileCheck = true;
-              break;
-            }
-          }
-          if(skipDoWhileCheck){
+          //FIXME: skipDoWhileCheck when it's only omp loops
+          if(LP->isOmpLoop){
             Value *cmp = nullptr;
             BranchInst *term = dyn_cast<BranchInst>(BB->getTerminator());
             if(term) cmp = term->getCondition();
