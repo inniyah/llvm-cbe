@@ -379,6 +379,8 @@ private:
   void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared);
   void OMP_RecordLiveIns(ForLoopProfile *LP);
   void keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock);
+  bool canSkipHeader(BasicBlock* header);
+
 
 
   void writeOperandDeref(Value *Operand);

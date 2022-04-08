@@ -2201,11 +2201,11 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
       Out << (CI->getZExtValue() ? '1' : '0');
     } else if (Context != ContextNormal && Ty->getPrimitiveSizeInBits() <= 64 &&
                ActiveBits < Ty->getPrimitiveSizeInBits()) {
-      if (ActiveBits >= 32)
-        Out << "INT64_C(";
+      //if (ActiveBits >= 32)
+      //  Out << "INT64_C(";
       Out << CI->getSExtValue(); // most likely a shorter representation
-      if (ActiveBits >= 32)
-        Out << ")";
+      //if (ActiveBits >= 32)
+      //  Out << ")";
     } else if (Ty->getPrimitiveSizeInBits() < 32 && Context == ContextNormal) {
       Out << "((";
       printSimpleType(Out, Ty, false) << ')';
@@ -5715,6 +5715,35 @@ void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &cond
   }
 }
 
+//header can be skipped if there's no insts with side effect
+bool CWriter::canSkipHeader(BasicBlock* header){
+  Value *cmp = nullptr;
+  BranchInst *term = dyn_cast<BranchInst>(header->getTerminator());
+  if(term && term->isConditional()) cmp = term->getCondition();
+
+  for (BasicBlock::iterator I = header->begin();
+      cast<Instruction>(I) != cmp &&
+      I != header->end() &&
+      !isa<BranchInst>(I); ++I){
+    Instruction *inst = &*I;
+
+    if(isSkipableInst(inst)) continue;
+
+    bool relatedToControl = false;
+    for(User *U : inst->users())
+      if(U == cmp || U == term){
+        relatedToControl = true;
+        break;
+      }
+    if(relatedToControl) continue;
+
+    errs() << "SUSAN: can't skip header" << header->getName() << "\n";
+    return false;
+  }
+
+  return true;
+}
+
 void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
   Loop *L = LP->L;
   // print loop body
@@ -5737,7 +5766,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
       if (BBLoop == L){
         if(BB == L->getHeader()){
           //FIXME: skipDoWhileCheck when it's only omp loops
-          if(LP->isOmpLoop){
+          if(LP->isOmpLoop || canSkipHeader(BB)){
             Value *cmp = nullptr;
             BranchInst *term = dyn_cast<BranchInst>(BB->getTerminator());
             if(term) cmp = term->getCondition();
@@ -5756,11 +5785,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
                   break;
                 }
 
-              if (!relatedToControl &&
-                  !isInlinableInst(*headerInst) &&
-                  !isDirectAlloca(headerInst) &&
-                  !isa<PHINode>(headerInst) &&
-                  !isSkipableInst(headerInst)){
+              if (!relatedToControl && !isSkipableInst(headerInst)){
                   printInstruction(headerInst);
               }
             }
@@ -5920,6 +5945,14 @@ bool CWriter::isSkipableInst(Instruction* inst){
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) return true;
     if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) return true;
     if(isa<PHINode>(inst)) return true;
+    if(isInlinableInst(*inst)) return true;
+    if(isDirectAlloca(inst)) return true;
+
+    if(CallInst* CI = dyn_cast<CallInst>(inst))
+      if(Function *F = CI->getCalledFunction())
+        if (F->getIntrinsicID() == Intrinsic::dbg_value)
+          return true;
+
     return false;
 }
 
