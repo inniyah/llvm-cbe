@@ -175,7 +175,7 @@ bool CWriter::isAddressExposed(Value *V) const {
 bool CWriter::isInlinableInst(Instruction &I) const {
   // Always inline cmp instructions, even if they are shared by multiple
   // expressions.  GCC generates horrible code if we don't.
-  if (isa<LoadInst>(I) || isa<CmpInst>(I) || isa<GetElementPtrInst>(I))
+  if (isa<LoadInst>(I) || isa<CmpInst>(I) || isa<GetElementPtrInst>(I) || isa<CastInst>(I))
     return true;
 
   //exit condition can be inlined
@@ -907,8 +907,9 @@ Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFi
           if(ConstantInt *minusOne = dyn_cast<ConstantInt>(subInst->getOperand(1)))
             if(minusOne->getSExtValue() == -1){
               Value *opnd0 = subInst->getOperand(0);
-              if(LoadInst* ld = dyn_cast<LoadInst>(opnd0)) return ld->getPointerOperand();
-              else return opnd0;
+              //if(LoadInst* ld = dyn_cast<LoadInst>(opnd0)) return ld->getPointerOperand();
+              //else return opnd0;
+              return opnd0;
             }
         }
       }
@@ -5750,7 +5751,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
             for (BasicBlock::iterator I = BB->begin();
                 cast<Instruction>(I) != cmp &&
                 I != BB->end() &&
-                isa<BranchInst>(I); ++I){
+                !isa<BranchInst>(I); ++I){
               Instruction *headerInst = &*I;
               errs() << "printing headerInst: " << *headerInst << "\n";
               bool relatedToControl = false;
