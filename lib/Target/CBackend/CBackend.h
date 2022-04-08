@@ -123,6 +123,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
   std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
+  bool isSkipableInst(Instruction* inst);
 
   CBERegion topRegion;
 

@@ -5732,20 +5732,46 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
     Loop *BBLoop = LI->getLoopFor(BB);
     if(BB != skipBlock){
       if (BBLoop == L){
-        /*if(BB == L->getHeader()){
-          bool skipHeader = false;
+        if(BB == L->getHeader()){
+          bool skipDoWhileCheck = false;
 	        for (auto succ = succ_begin(BB); succ != succ_end(BB); ++succ){
             BasicBlock* succBB = *succ;
             if(skipBlock && succBB == skipBlock){
-              skipHeader = true;
+              skipDoWhileCheck = true;
               break;
             }
           }
-          if(skipHeader){
+          if(skipDoWhileCheck){
+            Value *cmp = nullptr;
+            BranchInst *term = dyn_cast<BranchInst>(BB->getTerminator());
+            if(term) cmp = term->getCondition();
+            if(cmp)
+              errs() << "SUSAN: cmp is: " << *cmp << "\n";
+            for (BasicBlock::iterator I = BB->begin();
+                cast<Instruction>(I) != cmp &&
+                I != BB->end() &&
+                isa<BranchInst>(I); ++I){
+              Instruction *headerInst = &*I;
+              errs() << "printing headerInst: " << *headerInst << "\n";
+              bool relatedToControl = false;
+              for(User *U : headerInst->users())
+                if(U == cmp || U == term){
+                  relatedToControl = true;
+                  break;
+                }
+
+              if (!relatedToControl &&
+                  !isInlinableInst(*headerInst) &&
+                  !isDirectAlloca(headerInst) &&
+                  !isa<PHINode>(headerInst) &&
+                  !isSkipableInst(headerInst)){
+                  printInstruction(headerInst);
+              }
+            }
             times2bePrinted[BB]--;
             continue;
           }
-        }*/
+        }
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
@@ -5892,6 +5918,13 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val){
       }
     }
   }
+}
+
+bool CWriter::isSkipableInst(Instruction* inst){
+    if(omp_SkipVals.find(inst) != omp_SkipVals.end()) return true;
+    if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) return true;
+    if(isa<PHINode>(inst)) return true;
+    return false;
 }
 
 void CWriter::OMP_RecordLiveIns(ForLoopProfile *LP){
@@ -6182,11 +6215,7 @@ if( NATURAL_CONTROL_FLOW ){
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
     Instruction* inst = &*II;
-
-    if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
-    if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
-    if(dyn_cast<PHINode>(inst)) continue;
-
+    if(isSkipableInst(inst)) continue;
     if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
