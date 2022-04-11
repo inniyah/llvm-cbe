@@ -5769,7 +5769,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
           if(LP->isOmpLoop || canSkipHeader(BB)){
             Value *cmp = nullptr;
             BranchInst *term = dyn_cast<BranchInst>(BB->getTerminator());
-            if(term) cmp = term->getCondition();
+            if(term && term->isConditional()) cmp = term->getCondition();
             if(cmp)
               errs() << "SUSAN: cmp is: " << *cmp << "\n";
             for (BasicBlock::iterator I = BB->begin();
