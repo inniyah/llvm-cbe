@@ -5947,6 +5947,7 @@ bool CWriter::isSkipableInst(Instruction* inst){
     if(isa<PHINode>(inst)) return true;
     if(isInlinableInst(*inst)) return true;
     if(isDirectAlloca(inst)) return true;
+    if(isIVIncrement(inst)) return true;
 
     if(CallInst* CI = dyn_cast<CallInst>(inst))
       if(Function *F = CI->getCalledFunction())
