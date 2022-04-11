@@ -118,11 +118,12 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool IS_OPENMP_FUNCTION;
   std::set<ForLoopProfile*> ompLoops;
   std::set<GetElementPtrInst*> GEPNeedsReference;
-  std::set<Value*>skipInstsForPhis;
+  //std::set<Value*>skipInstsForPhis;
   std::map<PHINode*, std::set<Value*>>phis2print;
   std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
   std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
+  std::map<Instruction*, Value*> deleteAndReplaceInsts;
   bool isSkipableInst(Instruction* inst);
 
   CBERegion topRegion;
@@ -368,7 +369,7 @@ private:
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop = false);
   ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts);
+  void printLoopBody(ForLoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
@@ -380,6 +381,7 @@ private:
   void OMP_RecordLiveIns(ForLoopProfile *LP);
   void keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock);
   bool canSkipHeader(BasicBlock* header);
+  void preprocessSkippableInsts(Function &F);
 
 
 

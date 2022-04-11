@@ -982,6 +982,31 @@ void CWriter::omp_preprossesing(Function &F){
   //omp_searchForUsesToDelete(values2delete, F);
 }
 
+void CWriter::preprocessSkippableInsts(Function &F){
+  //skip ands with xFFFFFFFF
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    BinaryOperator *binop = dyn_cast<BinaryOperator>(&*I);
+    if(!binop) continue;
+
+    auto opcode = binop->getOpcode();
+    if(opcode != Instruction::And) continue;
+
+    if(ConstantInt *consInt = dyn_cast<ConstantInt>(binop->getOperand(0)))
+      if(consInt->getZExtValue() == 4294967295){
+        deleteAndReplaceInsts[&*I] = binop->getOperand(1);
+        continue;
+      }
+
+    if(ConstantInt *consInt = dyn_cast<ConstantInt>(binop->getOperand(1))){
+      if(consInt->getZExtValue() == 4294967295){
+        errs() << "SUSAN: resgitering deleteAndReplaceInsts: " << *I << "\n";
+        deleteAndReplaceInsts[&*I] = binop->getOperand(0);
+        continue;
+      }
+    }
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   if(ompFuncs.find(&F) != ompFuncs.end())
@@ -1022,6 +1047,7 @@ bool CWriter::runOnFunction(Function &F) {
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
   preprossesPHIs2Print(F);
+  preprocessSkippableInsts(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   collectNoneArrayGEPs(F);
@@ -2604,6 +2630,10 @@ std::string CWriter::GetValueName(Value *Operand) {
 /// writeInstComputationInline - Emit the computation for the specified
 /// instruction inline, with no destination provided.
 void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
+  if(deleteAndReplaceInsts.find(&I) != deleteAndReplaceInsts.end()){
+    writeOperandInternal(deleteAndReplaceInsts[&I]);
+    return;
+  }
   gepStart = startExpression;
   // C can't handle non-power-of-two integer types
   unsigned mask = 0;
@@ -2633,6 +2663,11 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
 
 void CWriter::writeOperandInternal(Value *Operand,
                                    enum OperandContext Context, bool startExpression) {
+  Instruction *inst = dyn_cast<Instruction>(Operand);
+  if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
+    writeOperandInternal(deleteAndReplaceInsts[inst]);
+    return;
+  }
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
@@ -2662,6 +2697,12 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
   }*/
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
     writeOperand(InstsToReplaceByPhi[Operand]);
+    return;
+  }
+
+  Instruction *inst = dyn_cast<Instruction>(Operand);
+  if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
+    writeOperand(deleteAndReplaceInsts[inst]);
     return;
   }
 
@@ -5505,7 +5546,7 @@ void CWriter::printFunction(Function &F) {
         for(auto &I : *BB){
           Instruction *inst = &I;
           if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
-          if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
+          //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           bool isDeclared = false;
@@ -5719,6 +5760,7 @@ void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &cond
 bool CWriter::canSkipHeader(BasicBlock* header){
   Value *cmp = nullptr;
   BranchInst *term = dyn_cast<BranchInst>(header->getTerminator());
+  bool hasSideEffect = false;
   if(term && term->isConditional()) cmp = term->getCondition();
 
   for (BasicBlock::iterator I = header->begin();
@@ -5737,14 +5779,17 @@ bool CWriter::canSkipHeader(BasicBlock* header){
       }
     if(relatedToControl) continue;
 
-    errs() << "SUSAN: can't skip header" << header->getName() << "\n";
-    return false;
+    hasSideEffect = true;
   }
 
-  return true;
+  if(!hasSideEffect) return true;
+  else return false;
+
+  //prove that if nk <= 0, k<nk is false
+
 }
 
-void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
+void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set<Value*> &skipInsts){
   Loop *L = LP->L;
   // print loop body
 
@@ -5807,7 +5852,6 @@ void CWriter::printLoopBody(ForLoopProfile *LP, std::set<Value*> &skipInsts){
       times2bePrinted[skipBlock]--;
     }
   }
-
 
 }
 
@@ -5943,7 +5987,8 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val){
 
 bool CWriter::isSkipableInst(Instruction* inst){
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) return true;
-    if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) return true;
+    //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) return true;
+    if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()) return true;
     if(isa<PHINode>(inst)) return true;
     if(isInlinableInst(*inst)) return true;
     if(isDirectAlloca(inst)) return true;
@@ -5995,7 +6040,6 @@ void CWriter::printLoopNew(Loop *L) {
   if(LP){
 
     if(LP->isOmpLoop){
-      condInst = findCondInst(L, negateCondition, true);
       for(auto I : omp_liveins[L])
         printInstruction(I);
 
@@ -6083,7 +6127,7 @@ void CWriter::printLoopNew(Loop *L) {
     }
 
     errs() << "SUSAN: printing loop body for" << *LP->L << "\n";
-    printLoopBody(LP, condRelatedInsts);
+    printLoopBody(LP, condInst, condRelatedInsts);
 
     Out << "}\n";
 
