@@ -276,6 +276,26 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
   return foundPathWithoutC;
 }
 
+CBERegion* CWriter::findRegionOfBlock(BasicBlock* BB){
+  std::queue<CBERegion*> toVisit;
+  toVisit.push(&topRegion);
+  while(!toVisit.empty()){
+    CBERegion *currNode = toVisit.front();
+    toVisit.pop();
+
+    if(currNode->entryBlock == BB) return currNode;
+
+    CBERegionMap[currNode->entryBlock] = currNode;
+    for(CBERegion *subRegion : currNode->thenSubRegions){
+      toVisit.push(subRegion);
+    }
+    for(CBERegion *subRegion : currNode->elseSubRegions){
+      toVisit.push(subRegion);
+    }
+  }
+
+}
+
 bool CWriter::alreadyVisitedRegion (BasicBlock* bbUT){
   std::set<CBERegion*> regions;
   for(auto &[region, bb] : recordedRegionBBs){
@@ -981,6 +1001,19 @@ void CWriter::omp_preprossesing(Function &F){
   //omp_searchForUsesToDelete(values2delete, F);
 }
 
+Value* CWriter::findOriginalValue(Value *val){
+  Instruction *valInst = dyn_cast<Instruction>(val);
+  if(!valInst) return val;
+
+  Value *newVal = val;
+  if(isa<CastInst>(valInst)) newVal = valInst->getOperand(0);
+
+  if(deleteAndReplaceInsts.find(valInst) != deleteAndReplaceInsts.end())
+    newVal = deleteAndReplaceInsts[valInst];
+
+  return newVal;
+}
+
 void CWriter::preprocessLoopProfiles(Function &F){
   std::list<Loop*> loops( LI->begin(), LI->end() );
 
@@ -1025,7 +1058,13 @@ void CWriter::preprocessLoopProfiles(Function &F){
     else if((LI->getLoopFor(IV->getIncomingBlock(1)) == L))
       LP->incr = IV->getIncomingValue(1);
 
-    LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
+    bool negateCondition = false;
+    Instruction *condInst = findCondInst(LP->L, negateCondition);
+    Value *ub = condInst->getOperand(1);
+    LP->ub = findOriginalValue(ub);
+
+
+    //LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
     LP->isOmpLoop = false;
 
     LoopProfiles.insert(LP);
@@ -1039,10 +1078,13 @@ void CWriter::preprocessLoopProfiles(Function &F){
   for(auto LP : LoopProfiles){
     errs() << "Loop: " << *LP->L << "\n";
     errs() << "isomp: " << LP->isOmpLoop << "\n";
+    errs() << "ub: " << *LP->ub << "\n";
   }
 
 
 }
+
+
 
 void CWriter::preprocessSkippableBranches(Function &F){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
@@ -1055,10 +1097,24 @@ void CWriter::preprocessSkippableBranches(Function &F){
     if(cmp->getPredicate() != CmpInst::ICMP_SGT
       && cmp->getPredicate() != CmpInst::ICMP_UGT) continue;
 
-    Value* ub = cmp->getOperand(1);
-    Instruction *ubInst = dyn_cast<Instruction>(ub);
-    if(ubInst && deleteAndReplaceInsts.find(ubInst) != deleteAndReplaceInsts.end())
-      ub = deleteAndReplaceInsts[ubInst];
+    Value* comparedVal = cmp->getOperand(0);
+    comparedVal = findOriginalValue(comparedVal);
+    errs() << "SUSAN: compared val:" << *comparedVal << "\n";
+
+    for(auto LP : LoopProfiles){
+      if(LP->ub != comparedVal) continue;
+
+      CBERegion *R = findRegionOfBlock(br->getParent());
+
+      if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
+        errs() << "added br to dead branches" << *br << "\n";
+        deadBranches[br] = 0;
+      }
+      else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
+        errs() << "added br to dead branches" << *br << "\n";
+        deadBranches[br] = 1;
+      }
+    }
 
   }
 }
@@ -1145,6 +1201,7 @@ bool CWriter::runOnFunction(Function &F) {
     omp_preprossesing(F);
 
    preprocessLoopProfiles(F);
+   preprocessSkippableBranches(F);
    printFunction(F);
 
   LI = nullptr;
@@ -5624,7 +5681,7 @@ void CWriter::printFunction(Function &F) {
       Loop *L = LP->L;
       std::set<Value*> skipInsts;
       bool negateCondition;
-      Instruction *condInst = findCondInst(L, negateCondition, true);
+      Instruction *condInst = findCondInst(L, negateCondition);
       BasicBlock *condBlock = condInst->getParent();
       findCondRelatedInsts(condBlock, skipInsts);
       for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
@@ -5773,7 +5830,7 @@ BasicBlock* findDoWhileExitingLatchBlock(Loop *L){
   return nullptr;
 }
 
-Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop){
+Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
 
   BasicBlock *condBB = findDoWhileExitingLatchBlock(L);
   Instruction* term = condBB->getTerminator();
@@ -6870,6 +6927,13 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   if(!I.isConditional()){
     //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
+    return;
+  }
+
+  //special case: branch is dead
+  if(deadBranches.find(&I) != deadBranches.end()){
+    errs() << "statically proven dead branch: " << I << "\n";
+    printBranchToBlock(I.getParent(), I.getSuccessor(deadBranches[&I]), 0);
     return;
   }
 

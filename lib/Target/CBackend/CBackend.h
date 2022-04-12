@@ -124,6 +124,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
   std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
   std::map<Instruction*, Value*> deleteAndReplaceInsts;
+  std::map<BranchInst*, int> deadBranches;
   bool isSkipableInst(Instruction* inst);
 
   CBERegion topRegion;
@@ -367,7 +368,7 @@ private:
   void omp_preprossesing(Function &F);
   Loop* findLoopAccordingTo(Function &F, Value *bound);
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
-  Instruction* findCondInst(Loop *L, bool &negateCondition, bool isOmpLoop = false);
+  Instruction* findCondInst(Loop *L, bool &negateCondition);
   ForLoopProfile* findForLoopProfile(Loop *L);
   void printLoopBody(ForLoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
@@ -384,6 +385,8 @@ private:
   void preprocessSkippableInsts(Function &F);
   void preprocessLoopProfiles(Function &F);
   void preprocessSkippableBranches(Function &F);
+  Value* findOriginalValue(Value *val);
+  CBERegion* findRegionOfBlock(BasicBlock* BB);
 
 
 
