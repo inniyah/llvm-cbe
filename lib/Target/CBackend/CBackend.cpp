@@ -835,7 +835,7 @@ void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
   ompLI->IV = getInductionVariable(L, SE);
   ompLI->isOmpLoop = true;
   assert(ompLI->IV && "SUSAN: only translate for loop for omp right now\n");
-  ompLoops.insert(ompLI);
+  LoopProfiles.insert(ompLI);
 }
 
 Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
@@ -952,7 +952,6 @@ void CWriter::omp_preprossesing(Function &F){
           //find ub & incr
           ompLP->ub = findOriginalUb(F, CI->getArgOperand(5), initCI, finiCI);
           ompLP->incr = CI->getArgOperand(7);
-          ompLP->isOmpLoop = true;
           currLP = ompLP;
         }
         else if(ompCall->getName().contains("__kmpc_for_static_fini")){
@@ -969,17 +968,99 @@ void CWriter::omp_preprossesing(Function &F){
           assert(ompLoop && "didn't find omp loop?\n");
           errs() << "SUSAN: omploop:" << *ompLoop << "\n";
           currLP->L = ompLoop;
+          currLP->isOmpLoop = true;
           currLP->IV = getInductionVariable(ompLoop, SE);
-          ompLoops.insert(currLP);
+          LoopProfiles.insert(currLP);
         }
       }
     }
   }
 
 
-
   //CreateOmpLoops(ompLoop, ub, lb, incr);
   //omp_searchForUsesToDelete(values2delete, F);
+}
+
+void CWriter::preprocessLoopProfiles(Function &F){
+  std::list<Loop*> loops( LI->begin(), LI->end() );
+
+  while( !loops.empty() )
+  {
+    Loop *L = loops.front();
+    loops.pop_front();
+
+    bool skipLoop = false;
+    for(auto LI : LoopProfiles)
+      if(LI->L ==  L && LI->isOmpLoop){
+        skipLoop = true;
+        break;
+      }
+
+    if(skipLoop){
+      errs() << "SUSAN: skipping omp loop: " << *L << "\n";
+      loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+      continue;
+    }
+
+    errs() << "SUSAN: recording loop as non omp: " << *L << "\n";
+    PHINode *IV = getInductionVariable(L, SE);
+    if(!IV){
+      loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+      continue;
+    }
+
+    ForLoopProfile* LP = new ForLoopProfile();
+    LP->L = L;
+    LP->IV = IV;
+
+    if(LI->getLoopFor(IV->getIncomingBlock(0)) != L)
+      LP->lb = IV->getIncomingValue(0);
+    else if((LI->getLoopFor(IV->getIncomingBlock(0)) == L))
+      LP->incr = IV->getIncomingValue(0);
+
+    if(LI->getLoopFor(IV->getIncomingBlock(1)) != L)
+      LP->lb = IV->getIncomingValue(1);
+    else if((LI->getLoopFor(IV->getIncomingBlock(1)) == L))
+      LP->incr = IV->getIncomingValue(1);
+
+    LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
+    LP->isOmpLoop = false;
+
+    LoopProfiles.insert(LP);
+
+    loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+  }
+
+
+  errs() << "=========LOOP PROFILES=========\n";
+  for(auto LP : LoopProfiles){
+    errs() << "Loop: " << *LP->L << "\n";
+    errs() << "isomp: " << LP->isOmpLoop << "\n";
+  }
+
+
+}
+
+void CWriter::preprocessSkippableBranches(Function &F){
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    BranchInst *br = dyn_cast<BranchInst>(&*I);
+    if(!br) continue;
+    if(!br->isConditional()) continue;
+    ICmpInst *cmp = dyn_cast<ICmpInst>(br->getCondition());
+    if(!cmp) continue;
+
+    if(cmp->getPredicate() != CmpInst::ICMP_SGT
+      && cmp->getPredicate() != CmpInst::ICMP_UGT) continue;
+
+    Value* ub = cmp->getOperand(1);
+    Instruction *ubInst = dyn_cast<Instruction>(ub);
+    if(ubInst && deleteAndReplaceInsts.find(ubInst) != deleteAndReplaceInsts.end())
+      ub = deleteAndReplaceInsts[ubInst];
+
+  }
 }
 
 void CWriter::preprocessSkippableInsts(Function &F){
@@ -1059,8 +1140,11 @@ bool CWriter::runOnFunction(Function &F) {
   /*
    * OpenMP: preprosessings
    */
+   LoopProfiles.clear();
    if(IS_OPENMP_FUNCTION)
     omp_preprossesing(F);
+
+   preprocessLoopProfiles(F);
    printFunction(F);
 
   LI = nullptr;
@@ -5531,10 +5615,12 @@ void CWriter::printFunction(Function &F) {
    * Only prints the loop
    */
   if(IS_OPENMP_FUNCTION){
-    for(auto LP : ompLoops)
-      OMP_RecordLiveIns(LP);
+    for(auto LP : LoopProfiles)
+      if(LP->isOmpLoop)
+        OMP_RecordLiveIns(LP);
     //find all the local variables to declare
-    for(auto LP : ompLoops){
+    for(auto LP : LoopProfiles){
+      if(!LP->isOmpLoop) continue;
       Loop *L = LP->L;
       std::set<Value*> skipInsts;
       bool negateCondition;
@@ -5556,15 +5642,20 @@ void CWriter::printFunction(Function &F) {
       }
     }
 
-    for(auto LP : ompLoops)
+    for(auto LP : LoopProfiles){
+      if(!LP->isOmpLoop) continue;
       for(auto I : omp_liveins[LP->L]){
         bool isDeclared = false;
         DeclareLocalVariable(I, PrintedVar, isDeclared);
         if(isDeclared) omp_declaredLocals[LP->L].insert(I);
       }
+    }
 
-    for(auto LP : ompLoops)
-      printLoopNew(LP->L);
+    for(auto LP : LoopProfiles)
+      if(LP->isOmpLoop){
+        errs() << "SUSAN: print omploop: " << *LP->L << "\n";
+        printLoopNew(LP->L);
+      }
   } else { // print basic blocks
     std::queue<BasicBlock*> toVisit;
     std::set<BasicBlock*> visited;
@@ -5700,32 +5791,13 @@ Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition, bool isOmpLoo
 }
 
 ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
-  for(auto ompLI : ompLoops){
-    if(ompLI->L == L)
-      return ompLI;
-  }
-
-  PHINode *IV = getInductionVariable(L, SE);
-  if(!IV) return nullptr;
-
-  ForLoopProfile* LP = new ForLoopProfile();
-  LP->L = L;
-  LP->IV = IV;
-
-  if(LI->getLoopFor(IV->getIncomingBlock(0)) != L)
-    LP->lb = IV->getIncomingValue(0);
-  else if((LI->getLoopFor(IV->getIncomingBlock(0)) == L))
-    LP->incr = IV->getIncomingValue(0);
-
-  if(LI->getLoopFor(IV->getIncomingBlock(1)) != L)
-    LP->lb = IV->getIncomingValue(1);
-  else if((LI->getLoopFor(IV->getIncomingBlock(1)) == L))
-    LP->incr = IV->getIncomingValue(1);
-
-  LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
-  LP->isOmpLoop = false;
-
-  return LP;
+  for(auto LP : LoopProfiles)
+    if(LP->L == L){
+      errs() << "SUSAN: found LP for L:" << *L << "\n";
+      if(LP->isOmpLoop) errs() << "isomp\n";
+      return LP;
+    }
+  return nullptr;
 }
 
 void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts){
@@ -5760,7 +5832,6 @@ void CWriter::findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &cond
 bool CWriter::canSkipHeader(BasicBlock* header){
   Value *cmp = nullptr;
   BranchInst *term = dyn_cast<BranchInst>(header->getTerminator());
-  bool hasSideEffect = false;
   if(term && term->isConditional()) cmp = term->getCondition();
 
   for (BasicBlock::iterator I = header->begin();
@@ -5779,14 +5850,10 @@ bool CWriter::canSkipHeader(BasicBlock* header){
       }
     if(relatedToControl) continue;
 
-    hasSideEffect = true;
+    return false;
   }
 
-  if(!hasSideEffect) return true;
-  else return false;
-
-  //prove that if nk <= 0, k<nk is false
-
+  return true;
 }
 
 void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set<Value*> &skipInsts){

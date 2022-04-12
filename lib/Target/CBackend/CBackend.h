@@ -116,7 +116,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
-  std::set<ForLoopProfile*> ompLoops;
+  std::set<ForLoopProfile*> LoopProfiles;
   std::set<GetElementPtrInst*> GEPNeedsReference;
   //std::set<Value*>skipInstsForPhis;
   std::map<PHINode*, std::set<Value*>>phis2print;
@@ -382,6 +382,8 @@ private:
   void keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock);
   bool canSkipHeader(BasicBlock* header);
   void preprocessSkippableInsts(Function &F);
+  void preprocessLoopProfiles(Function &F);
+  void preprocessSkippableBranches(Function &F);
 
 
 
