@@ -293,7 +293,7 @@ CBERegion* CWriter::findRegionOfBlock(BasicBlock* BB){
       toVisit.push(subRegion);
     }
   }
-
+  return nullptr;
 }
 
 bool CWriter::alreadyVisitedRegion (BasicBlock* bbUT){
@@ -1104,14 +1104,18 @@ void CWriter::preprocessSkippableBranches(Function &F){
     for(auto LP : LoopProfiles){
       if(LP->ub != comparedVal) continue;
 
+      errs() << "SUSAN: loop is: " << *LP->L << "\n";
+      errs() << "branch: " << *br << "\n";
+      errs() << "ub: " << *LP->ub << "\n";
+
       CBERegion *R = findRegionOfBlock(br->getParent());
 
       if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
-        errs() << "added br to dead branches" << *br << "\n";
+        errs() << "added br to dead branches 0" << *br << "\n";
         deadBranches[br] = 0;
       }
       else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
-        errs() << "added br to dead branches" << *br << "\n";
+        errs() << "added br to dead branches 1" << *br << "\n";
         deadBranches[br] = 1;
       }
     }
@@ -5736,11 +5740,30 @@ void CWriter::printFunction(Function &F) {
         times2bePrinted[currBB]--;
       }
 
-	    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-		    BasicBlock *succBB = *succ;
-		    if(visited.find(succBB)==visited.end()){
-          toVisit.push(succBB);
-          visited.insert(succBB);
+      if(BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator())){
+        if(deadBranches.find(br) != deadBranches.end()){
+          BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
+          if(visited.find(succBB) == visited.end()){
+            toVisit.push(succBB);
+            visited.insert(succBB);
+          }
+        }
+        else{
+	        for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+		        BasicBlock *succBB = *succ;
+		        if(visited.find(succBB)==visited.end()){
+              toVisit.push(succBB);
+              visited.insert(succBB);
+            }
+          }
+        }
+      } else {
+	      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+		      BasicBlock *succBB = *succ;
+		      if(visited.find(succBB)==visited.end()){
+            toVisit.push(succBB);
+            visited.insert(succBB);
+          }
         }
       }
     }
@@ -5933,7 +5956,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set
     Loop *BBLoop = LI->getLoopFor(BB);
     if(BB != skipBlock){
       if (BBLoop == L){
-        if(BB == L->getHeader()){
+        /*if(BB == L->getHeader()){
           //FIXME: skipDoWhileCheck when it's only omp loops
           if(LP->isOmpLoop || canSkipHeader(BB)){
             Value *cmp = nullptr;
@@ -5958,10 +5981,11 @@ void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set
                   printInstruction(headerInst);
               }
             }
+            printBranchToBlock(SI.getParent(), SI.getDefaultDest(), 2);
             times2bePrinted[BB]--;
             continue;
           }
-        }
+        }*/
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
