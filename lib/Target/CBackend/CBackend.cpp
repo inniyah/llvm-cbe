@@ -1006,10 +1006,13 @@ Value* CWriter::findOriginalValue(Value *val){
   if(!valInst) return val;
 
   Value *newVal = val;
-  if(isa<CastInst>(valInst)) newVal = valInst->getOperand(0);
 
-  if(deleteAndReplaceInsts.find(valInst) != deleteAndReplaceInsts.end())
-    newVal = deleteAndReplaceInsts[valInst];
+  while(isa<CastInst>(newVal) || isa<LoadInst>(newVal)){
+    Instruction* currInst = cast<Instruction>(newVal);
+    newVal = currInst->getOperand(0);
+    if(deleteAndReplaceInsts.find(currInst) != deleteAndReplaceInsts.end())
+      newVal = deleteAndReplaceInsts[valInst];
+  }
 
   return newVal;
 }
