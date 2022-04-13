@@ -907,7 +907,10 @@ void CWriter::preprossesPHIs2Print(Function &F){
           PHIValues2Print.insert(std::make_pair(predBB, phi));
         }
         else if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
-          InstsToReplaceByPhi[phiVal] = phi;
+          if(deleteAndReplaceInsts.find(incomingInst) != deleteAndReplaceInsts.end())
+            InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = phi;
+          else
+            InstsToReplaceByPhi[phiVal] = phi;
         }
       }
     }
@@ -1019,7 +1022,7 @@ Value* CWriter::findOriginalValue(Value *val){
  }
 
   valInst = dyn_cast<Instruction>(newVal);
-  if(!valInst) return val;
+  if(!valInst) return newVal;
 
   if(deleteAndReplaceInsts.find(valInst) != deleteAndReplaceInsts.end())
     newVal = deleteAndReplaceInsts[valInst];
@@ -1199,8 +1202,8 @@ bool CWriter::runOnFunction(Function &F) {
 
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
-  preprossesPHIs2Print(F);
   preprocessSkippableInsts(F);
+  preprossesPHIs2Print(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
   collectNoneArrayGEPs(F);
@@ -5698,8 +5701,8 @@ void CWriter::printFunction(Function &F) {
       if(LP->isOmpLoop)
         OMP_RecordLiveIns(LP);
     //find all the local variables to declare
-    std::set<std::string> declaredLocals;
     for(auto LP : LoopProfiles){
+      std::set<std::string> declaredLocals;
       if(!LP->isOmpLoop) continue;
       Loop *L = LP->L;
       std::set<Value*> skipInsts;
@@ -5722,14 +5725,14 @@ void CWriter::printFunction(Function &F) {
       }
     }
 
-    for(auto LP : LoopProfiles){
+    /*for(auto LP : LoopProfiles){
       if(!LP->isOmpLoop) continue;
       for(auto I : omp_liveins[LP->L]){
         bool isDeclared = false;
         DeclareLocalVariable(I, PrintedVar, isDeclared, declaredLocals);
         if(isDeclared) omp_declaredLocals[LP->L].insert(I);
       }
-    }
+    }*/
 
     for(auto LP : LoopProfiles)
       if(LP->isOmpLoop){
