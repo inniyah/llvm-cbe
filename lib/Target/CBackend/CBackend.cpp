@@ -5736,10 +5736,12 @@ void CWriter::printFunction(Function &F) {
             printLoop(L);
         }
       } else {
+        errs() << "SUSAN: printing bb:" << currBB->getName() << "\n";
         printBasicBlock(currBB);
         times2bePrinted[currBB]--;
       }
 
+      CBERegion *R = findRegionOfBlock(currBB);
       if(BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator())){
         if(deadBranches.find(br) != deadBranches.end()){
           BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
@@ -5749,17 +5751,26 @@ void CWriter::printFunction(Function &F) {
           }
         }
         else{
-	        for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
-		        BasicBlock *succBB = *succ;
-		        if(visited.find(succBB)==visited.end()){
-              toVisit.push(succBB);
-              visited.insert(succBB);
-            }
+          errs() << "SUSAN: br:" << *br << "\n";
+          BasicBlock *succ0 = br->getSuccessor(0);
+          if(R && !nodeBelongsToRegion(succ0, R)) continue;
+		      if(visited.find(succ0)==visited.end()){
+            toVisit.push(succ0);
+            visited.insert(succ0);
+          }
+
+          if(!br->isConditional()) continue;
+          BasicBlock *succ1 = br->getSuccessor(1);
+          if(R && !nodeBelongsToRegion(succ1, R, true)) continue;
+		      if(visited.find(succ1)==visited.end()){
+            toVisit.push(succ1);
+            visited.insert(succ1);
           }
         }
       } else {
 	      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
 		      BasicBlock *succBB = *succ;
+          if(R && !nodeBelongsToRegion(succBB, R)) continue;
 		      if(visited.find(succBB)==visited.end()){
             toVisit.push(succBB);
             visited.insert(succBB);
