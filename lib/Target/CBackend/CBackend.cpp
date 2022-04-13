@@ -6920,7 +6920,7 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
       }
 }
 
-void CWriter::emitIfBlock(CBERegion *R, BasicBlock* phiBB, bool isElseBranch){
+void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
       if (Loop *L = LI->getLoopFor(bb)) {
@@ -7086,20 +7086,20 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     if(trueBrOnly){
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       //printPHIsIfNecessary()
-      emitIfBlock(cbeRegion, trueStartBB);
+      emitIfBlock(cbeRegion);
     }
     //Case 3: only print if body with reveresed case
     else if(falseBrOnly){
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(cbeRegion, falseStartBB);
+      emitIfBlock(cbeRegion);
     }
     //Case 4: print if & else;
     else{
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      emitIfBlock(cbeRegion, trueStartBB);
+      emitIfBlock(cbeRegion);
       Out << "  } else {\n";
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(1), 2);
-      emitIfBlock(cbeRegion, falseStartBB, true);
+      emitIfBlock(cbeRegion, true);
     }
 
     Out << "}\n";
