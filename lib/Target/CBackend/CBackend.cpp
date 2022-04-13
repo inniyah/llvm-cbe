@@ -5256,11 +5256,12 @@ void CWriter::insertDeclaredInsts(Instruction* I){
     declaredInsts.insert(I);
 }
 
-void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared){
+void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared,
+                                   std::set<std::string> &declaredLocals){
 
-   std::set<std::string> declaredLocals;
    if (AllocaInst *AI = isDirectAlloca(I)) {
      auto varName = GetValueName(AI);
+     errs() << "SUSAN: declaring varName 5264: " << varName << "\n";
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
      declaredLocals.insert(varName);
 
@@ -5293,6 +5294,9 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      PrintedVar = true;
      isDeclared = true;
    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
+     auto varName = GetValueName(I);
+     errs() << "SUSAN: declaring varName 5298: " << varName << "\n";
+     if(declaredLocals.find(varName) != declaredLocals.end()) return;
      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
        auto varName = GetValueName(I);
        if(declaredLocals.find(varName) != declaredLocals.end()) return;
@@ -5663,10 +5667,12 @@ void CWriter::printFunction(Function &F) {
 
   // print local variable information for the function
   bool isDeclared = false;
-  if(!IS_OPENMP_FUNCTION)
+  if(!IS_OPENMP_FUNCTION){
+     std::set<std::string> declaredLocals;
      for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
        if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end())
-        DeclareLocalVariable(&*I, PrintedVar, isDeclared);
+        DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
+  }
 
   if (PrintedVar)
     Out << '\n';
@@ -5683,6 +5689,7 @@ void CWriter::printFunction(Function &F) {
       if(LP->isOmpLoop)
         OMP_RecordLiveIns(LP);
     //find all the local variables to declare
+    std::set<std::string> declaredLocals;
     for(auto LP : LoopProfiles){
       if(!LP->isOmpLoop) continue;
       Loop *L = LP->L;
@@ -5700,7 +5707,7 @@ void CWriter::printFunction(Function &F) {
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           bool isDeclared = false;
-          DeclareLocalVariable(inst, PrintedVar, isDeclared);
+          DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
           if(isDeclared) omp_declaredLocals[L].insert(inst);
         }
       }
@@ -5710,7 +5717,7 @@ void CWriter::printFunction(Function &F) {
       if(!LP->isOmpLoop) continue;
       for(auto I : omp_liveins[LP->L]){
         bool isDeclared = false;
-        DeclareLocalVariable(I, PrintedVar, isDeclared);
+        DeclareLocalVariable(I, PrintedVar, isDeclared, declaredLocals);
         if(isDeclared) omp_declaredLocals[LP->L].insert(I);
       }
     }

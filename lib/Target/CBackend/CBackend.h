@@ -378,7 +378,7 @@ private:
   void FindLiveInsFor(Loop *L, Value *val);
   void searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks);
   void findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts);
-  void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared);
+  void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared, std::set<std::string> &declaredLocals);
   void OMP_RecordLiveIns(ForLoopProfile *LP);
   void keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock);
   bool canSkipHeader(BasicBlock* header);
