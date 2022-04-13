@@ -6955,9 +6955,18 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   }
 
   //special case: branch is dead
+  BasicBlock *brBB = I.getParent();
+  CBERegion *cbeRegion = CBERegionMap[brBB];
   if(deadBranches.find(&I) != deadBranches.end()){
     errs() << "statically proven dead branch: " << I << "\n";
-    printBranchToBlock(I.getParent(), I.getSuccessor(deadBranches[&I]), 0);
+
+    Loop *L = LI->getLoopFor(brBB);
+    if(L && L->getHeader() == brBB){
+      printBranchToBlock(I.getParent(), I.getSuccessor(deadBranches[&I]), 0);
+      return;
+    }
+
+    emitIfBlock(cbeRegion, deadBranches[&I]);
     return;
   }
 
@@ -6969,16 +6978,16 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
       Out << ") {\n";
 
       //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 2);
-      printBranchToBlock(I.getParent(), I.getSuccessor(0), 2);
+      printBranchToBlock(brBB, I.getSuccessor(0), 2);
 
       Out << "  } else {\n";
       //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(1), 2);
-      printBranchToBlock(I.getParent(), I.getSuccessor(1), 2);
+      printBranchToBlock(brBB, I.getSuccessor(1), 2);
 
       Out << "  }\n";
     } else {
       //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
-      printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
+      printBranchToBlock(brBB, I.getSuccessor(0), 0);
     }
     Out << "\n";
     return;
@@ -6989,7 +6998,6 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     return;
 
 
-  CBERegion *cbeRegion = CBERegionMap[I.getParent()];
 
   BasicBlock *exitingBB = I.getParent();
   BasicBlock *exitLoopTrueBB = nullptr;
@@ -7004,8 +7012,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     }
   }
 
-  //Print condition
-  BasicBlock *brBB = I.getParent();
+
   //If structure 1 : on one branch the successor is pd of the branch block
   //If structure 2 : one branch is branching to a basic block that has return stmt
   BasicBlock *trueStartBB = I.getSuccessor(0);
