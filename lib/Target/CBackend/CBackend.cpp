@@ -1007,13 +1007,21 @@ Value* CWriter::findOriginalValue(Value *val){
 
   Value *newVal = val;
 
-  Instruction *currInst = valInst;
-  while(isa<CastInst>(newVal) || isa<LoadInst>(newVal)){
-    Instruction* currInst = cast<Instruction>(newVal);
-    newVal = currInst->getOperand(0);
-  }
+  while(isa<CastInst>(newVal) || isa<LoadInst>(newVal) || isa<PHINode>(newVal)){
+    Instruction *currInst = cast<Instruction>(newVal);
+    if(isa<CastInst>(newVal) || isa<LoadInst>(newVal))
+      newVal = currInst->getOperand(0);
+    else if(isa<PHINode>(newVal)){
+      PHINode *phi = dyn_cast<PHINode>(currInst);
+      for(unsigned i=0; i<phi->getNumIncomingValues(); ++i)
+        newVal = phi->getIncomingValue(i);
+    }
+ }
 
-  if(deleteAndReplaceInsts.find(currInst) != deleteAndReplaceInsts.end())
+  valInst = dyn_cast<Instruction>(newVal);
+  if(!valInst) return val;
+
+  if(deleteAndReplaceInsts.find(valInst) != deleteAndReplaceInsts.end())
     newVal = deleteAndReplaceInsts[valInst];
   return newVal;
 }
