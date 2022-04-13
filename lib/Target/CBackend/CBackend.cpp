@@ -1007,13 +1007,14 @@ Value* CWriter::findOriginalValue(Value *val){
 
   Value *newVal = val;
 
+  Instruction *currInst = valInst;
   while(isa<CastInst>(newVal) || isa<LoadInst>(newVal)){
     Instruction* currInst = cast<Instruction>(newVal);
     newVal = currInst->getOperand(0);
-    if(deleteAndReplaceInsts.find(currInst) != deleteAndReplaceInsts.end())
-      newVal = deleteAndReplaceInsts[valInst];
   }
 
+  if(deleteAndReplaceInsts.find(currInst) != deleteAndReplaceInsts.end())
+    newVal = deleteAndReplaceInsts[valInst];
   return newVal;
 }
 
@@ -7298,6 +7299,7 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " * ";
         writeOperand(I.getOperand(1), ContextCasted);
+        //Out << ")";
       }
       else if(opcode == Instruction::URem || opcode == Instruction::FRem){
         //Out << "(";
@@ -7369,16 +7371,18 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::LShr || opcode == Instruction::AShr){
-        //Out << "(";
+        Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " >> ";
         writeOperand(I.getOperand(1), ContextCasted);
+        Out << ")";
       }
       else if(opcode == Instruction::Shl){
-        //Out << "(";
+        Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " << ";
         writeOperand(I.getOperand(1), ContextCasted);
+        Out << ")";
       }
       else if(opcode == Instruction::Xor){
         //Out << "(";
@@ -7451,7 +7455,10 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     if(I.getOpcode() == Instruction::Add
         || I.getOpcode() == Instruction::FAdd
         || I.getOpcode() == Instruction::Sub
-        || I.getOpcode() == Instruction::FSub)
+        || I.getOpcode() == Instruction::FSub
+        || I.getOpcode() == Instruction::Shl
+        || I.getOpcode() == Instruction::LShr
+        || I.getOpcode() == Instruction::AShr)
       Out << "(";
     writeOperandWithCast(I.getOperand(0), I.getOpcode());
 
@@ -7503,7 +7510,10 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     if(I.getOpcode() == Instruction::Add
         || I.getOpcode() == Instruction::FAdd
         || I.getOpcode() == Instruction::Sub
-        || I.getOpcode() == Instruction::FSub)
+        || I.getOpcode() == Instruction::FSub
+        || I.getOpcode() == Instruction::Shl
+        || I.getOpcode() == Instruction::LShr
+        || I.getOpcode() == Instruction::AShr)
       Out << ")";
     if (NeedsClosingParens)
       Out << "))";
