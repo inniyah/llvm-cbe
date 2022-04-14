@@ -908,7 +908,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
         if(isa<Constant>(phiVal) || isa<LoadInst>(phiVal)){
           PHIValues2Print.insert(std::make_pair(predBB, phi));
         }
-        else if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
+        if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
           if(deleteAndReplaceInsts.find(incomingInst) != deleteAndReplaceInsts.end())
             InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = phi;
           else
@@ -5688,8 +5688,10 @@ void CWriter::printFunction(Function &F) {
   if(!IS_OPENMP_FUNCTION){
      std::set<std::string> declaredLocals;
      for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
-       if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end())
-        DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
+       if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end()){
+         errs() << "SUSAN: declaring local: " << *I << "\n";
+         DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
+       }
   }
 
   if (PrintedVar)
