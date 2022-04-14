@@ -2878,7 +2878,11 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
       Out << "((void*)&";
   }
 
+  if(isIVIncrement(Operand) && !isa<CmpInst>(CurInstr) && !omp_declarePrivate)
+    Out << "(";
   writeOperandInternal(Operand, Context, startExpression);
+  if(isIVIncrement(Operand) && !isa<CmpInst>(CurInstr) && !omp_declarePrivate)
+    Out << " + 1)";
 
   if (isAddressImplicit)
     Out << ')';
@@ -6229,7 +6233,9 @@ void CWriter::printLoopNew(Loop *L) {
       //find if there are private variables
       bool printPrivate = true;
       bool printComma = false;
+      omp_declarePrivate=false;
       for(auto inst : omp_declaredLocals[LP->L]){
+        omp_declarePrivate = true;
         errs() << "SUSAN: printing local in private: " << *inst << "\n";
         errs() << "LP->IV: " << LP->IV << "\n";
         if(inst == LP->IV ||
@@ -6252,6 +6258,7 @@ void CWriter::printLoopNew(Loop *L) {
 
       Out << "\n";
     }
+    omp_declarePrivate=false;
 
     std::set<Value*> condRelatedInsts;
     BasicBlock *condBlock = condInst->getParent();
@@ -6470,6 +6477,8 @@ if( NATURAL_CONTROL_FLOW ){
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = --BB->end(); II != E; ++II) {
     Instruction* inst = &*II;
+
+
     if(isSkipableInst(inst)) continue;
     if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
 

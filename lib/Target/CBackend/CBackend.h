@@ -125,6 +125,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
   std::map<Instruction*, Value*> deleteAndReplaceInsts;
   std::map<BranchInst*, int> deadBranches;
+  bool omp_declarePrivate;
   bool isSkipableInst(Instruction* inst);
 
   CBERegion topRegion;
