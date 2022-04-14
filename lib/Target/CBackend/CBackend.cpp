@@ -824,8 +824,10 @@ PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
       errs() << "SUSAN: didn't find IV 796\n";
       return nullptr;
     }
-    const SCEVAddRecExpr *AddRec =
-        dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
+
+    const SCEVAddRecExpr *AddRec = nullptr;
+    if(SE->isSCEVable(PhiVar->getType()))
+        AddRec = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(PhiVar));
     if (!AddRec || !AddRec->isAffine()){
       errs() << "SUSAN: can't find addRec\n";
       continue;
@@ -5875,19 +5877,25 @@ void CWriter::keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &I
 }
 
 BasicBlock* findDoWhileExitingLatchBlock(Loop *L){
-  SmallVector< BasicBlock*, 1> ExitingBlocks;
+  /*SmallVector< BasicBlock*, 1> ExitingBlocks;
   SmallVector< BasicBlock*, 1> ExitBlocks;
   L->getExitingBlocks(ExitingBlocks);
   L->getExitBlocks(ExitBlocks);
 
   for(SmallVector<BasicBlock*,1>::iterator i=ExitingBlocks.begin(), e=ExitingBlocks.end(); i!=e; ++i){
     BasicBlock *exit = *i;
-    Instruction* term = exit->getTerminator();
-    BranchInst* brInst = dyn_cast<BranchInst>(term);
     if(L->isLoopLatch(exit))
      return exit;
-  }
-  return nullptr;
+  }*/
+
+  //Assuming loops are all rotated
+  BasicBlock *latch = L->getLoopLatch();
+  BranchInst *br = dyn_cast<BranchInst>(latch->getTerminator());
+  assert(br && "latch doesn't end with branch inst??\n");
+  if(!br->isConditional())
+    return latch->getSinglePredecessor();
+  return latch;
+  //return nullptr;
 }
 
 Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
