@@ -1116,27 +1116,50 @@ void CWriter::preprocessSkippableBranches(Function &F){
     if(!cmp) continue;
 
     if(cmp->getPredicate() != CmpInst::ICMP_SGT
-      && cmp->getPredicate() != CmpInst::ICMP_UGT) continue;
+      && cmp->getPredicate() != CmpInst::ICMP_UGT
+      && cmp->getPredicate() != CmpInst::ICMP_EQ) continue;
 
     Value* comparedVal = cmp->getOperand(0);
     comparedVal = findOriginalValue(comparedVal);
     errs() << "SUSAN: compared val:" << *comparedVal << "\n";
 
+
+    // check if it's a call to omp master
+    bool isMasterCall = false;
+    if(CallInst* CI = dyn_cast<CallInst>(comparedVal))
+      if(Function *ompCall = CI->getCalledFunction())
+        if(ompCall->getName().contains("__kmpc_master"))
+          if(cmp->getPredicate() == CmpInst::ICMP_EQ)
+            isMasterCall = true;
+
+
     for(auto LP : LoopProfiles){
-      if(LP->ub != comparedVal) continue;
+
+      bool isDoWhileReverse = false;
+      if(LP->ub == comparedVal
+          && (cmp->getPredicate() == CmpInst::ICMP_SGT
+              || cmp->getPredicate() == CmpInst::ICMP_UGT))
+                isDoWhileReverse = true;
+
+      if(!isDoWhileReverse && !isMasterCall) continue;
+
 
       errs() << "SUSAN: loop is: " << *LP->L << "\n";
       errs() << "branch: " << *br << "\n";
       errs() << "ub: " << *LP->ub << "\n";
 
-      CBERegion *R = findRegionOfBlock(br->getParent());
+      if(isDoWhileReverse){
+        CBERegion *R = findRegionOfBlock(br->getParent());
 
-      if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
-        errs() << "added br to dead branches 0" << *br << "\n";
-        deadBranches[br] = 0;
-      }
-      else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
-        errs() << "added br to dead branches 1" << *br << "\n";
+        if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
+          errs() << "added br to dead branches 0" << *br << "\n";
+          deadBranches[br] = 0;
+        }
+        else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
+          errs() << "added br to dead branches 1" << *br << "\n";
+          deadBranches[br] = 1;
+        }
+      } else{
         deadBranches[br] = 1;
       }
     }
