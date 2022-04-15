@@ -959,6 +959,7 @@ void CWriter::omp_preprossesing(Function &F){
   ub = nullptr;
   incr = nullptr;
   ForLoopProfile *currLP = nullptr;
+  int countBarrier = 0;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *ompCall = CI->getCalledFunction()){
@@ -1002,8 +1003,20 @@ void CWriter::omp_preprossesing(Function &F){
           errs() << "SUSAN: omploop:" << *ompLoop << "\n";
           currLP->L = ompLoop;
           currLP->isOmpLoop = true;
+          currLP->barrier = false;
           currLP->IV = getInductionVariable(ompLoop, SE);
           LoopProfiles.insert(currLP);
+        }
+
+
+        /*
+         * OpenMP: search for barrier call
+         */
+        if(ompCall->getName().contains("__kmpc_barrier")){
+          errs() << "SUSAN: barrier call!!\n";
+          countBarrier++;
+          if(countBarrier>1)
+            currLP->barrier = true;
         }
       }
     }
@@ -5790,6 +5803,12 @@ void CWriter::printFunction(Function &F) {
           if(isDeclared) omp_declaredLocals[L].insert(inst);
         }
       }
+
+
+      //in case induction variable isn't declared
+      bool isDeclared = false;
+      DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+      //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
     }
 
     /*for(auto LP : LoopProfiles){
@@ -6391,6 +6410,9 @@ void CWriter::printLoopNew(Loop *L) {
     printLoopBody(LP, condInst, condRelatedInsts);
 
     Out << "}\n";
+
+    if(LP->barrier)
+      Out << "#pragma omp barrier\n";
 
     return;
   }

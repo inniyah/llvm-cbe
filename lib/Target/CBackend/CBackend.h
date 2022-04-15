@@ -70,6 +70,7 @@ typedef struct ForLoopProfile{
   Value *incr;
   PHINode *IV;
   bool isOmpLoop;
+  bool barrier;
 } ForLoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
