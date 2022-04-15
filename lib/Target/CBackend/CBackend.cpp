@@ -2911,11 +2911,26 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
       Out << "((void*)&";
   }
 
+
+  bool isOmpLoop = false;
+  ForLoopProfile *LP = nullptr;
+  for(auto lp : LoopProfiles)
+    if(CurLoop && lp->L == CurLoop && lp->isOmpLoop){
+      isOmpLoop = true;
+      LP = lp;
+      break;
+    }
+
   if(isIVIncrement(Operand) && !isa<CmpInst>(CurInstr) && !omp_declarePrivate)
     Out << "(";
-  writeOperandInternal(Operand, Context, startExpression);
+
+  if(isIVIncrement(Operand) && !isa<CmpInst>(CurInstr) && !omp_declarePrivate && isOmpLoop)
+    writeOperandInternal(LP->IV, Context, startExpression);
+  else
+    writeOperandInternal(Operand, Context, startExpression);
+
   if(isIVIncrement(Operand) && !isa<CmpInst>(CurInstr) && !omp_declarePrivate)
-    Out << " + 1)";
+      Out << " + 1)";
 
   if (isAddressImplicit)
     Out << ')';
@@ -6259,6 +6274,7 @@ void CWriter::OMP_RecordLiveIns(ForLoopProfile *LP){
 }
 
 void CWriter::printLoopNew(Loop *L) {
+  CurLoop = L;
   // FIXME: assume all omp loops are for loops
 
   //initialize all the PHI variables
@@ -6319,9 +6335,10 @@ void CWriter::printLoopNew(Loop *L) {
     findCondRelatedInsts(condBlock, condRelatedInsts);
     for(auto condRelatedInst : condRelatedInsts){
       Instruction *inst = cast<Instruction>(condRelatedInst);
-      if(isa<PHINode>(inst) || isa<BranchInst>(inst)
-          || isa<CmpInst>(inst) || isInlinableInst(*inst)
-          || inst == LP->incr) continue;
+      if(isIVIncrement(inst) ||isa<PHINode>(inst)
+          || isa<BranchInst>(inst) || isa<CmpInst>(inst)
+          || isInlinableInst(*inst) || inst == LP->incr)
+        continue;
       errs() << "SUSAN: printing condRelatedInst: " << *inst << "\n";
       printInstruction(inst);
     }
@@ -6467,7 +6484,7 @@ void CWriter::printLoopNew(Loop *L) {
   }
 
   Out << "}\n";
-
+  CurLoop = nullptr;
 }
 
 void CWriter::printLoop(Loop *L) {

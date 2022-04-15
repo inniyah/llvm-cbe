@@ -151,6 +151,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   MCContext *TCtx = nullptr;
   const DataLayout *TD = nullptr;
   const Instruction *CurInstr = nullptr;
+  const Loop *CurLoop = nullptr;
 
   IDMap<const ConstantFP *> FPConstantMap;
   std::set<const Argument *> ByValParams;
