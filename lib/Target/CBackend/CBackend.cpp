@@ -960,6 +960,10 @@ void CWriter::omp_preprossesing(Function &F){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *ompCall = CI->getCalledFunction()){
+
+        /*
+         * OpenMP: translate omp parallel for schedule (static)
+         */
         if(ompCall->getName().contains("__kmpc_for_static_init")){
           ForLoopProfile *ompLP = new ForLoopProfile();
           initCI = CI;
@@ -5312,6 +5316,19 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      PrintedVar = true;
      isDeclared = true;
    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
+
+    /*
+     * OpenMP: skip some declarations related to OpenMP calls
+     */
+    if(CallInst* CI = dyn_cast<CallInst>(&*I))
+      if(Function *ompCall = CI->getCalledFunction())
+        if(ompCall->getName().contains("__kmpc_master")
+            || ompCall->getName().contains("__kmpc_end_master"))
+          return;
+    /*
+     * OpenMP end
+     */
+
      auto varName = GetValueName(I);
      errs() << "SUSAN: declaring varName 5298: " << varName << "\n";
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
@@ -6491,6 +6508,23 @@ if( NATURAL_CONTROL_FLOW ){
 
     if(isSkipableInst(inst)) continue;
     if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
+
+
+    /*
+     * OpenMP: translate omp master
+     */
+    if(CallInst* CI = dyn_cast<CallInst>(inst)){
+      if(Function *ompCall = CI->getCalledFunction()){
+        if(ompCall->getName().contains("__kmpc_master")){
+          Out << "#pragma omp master\n{\n";
+          continue;
+        }
+        if(ompCall->getName().contains("__kmpc_end_master")){
+          Out << "}\n";
+          continue;
+        }
+      }
+    }
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
       if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
