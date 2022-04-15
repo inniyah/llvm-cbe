@@ -1004,6 +1004,7 @@ void CWriter::omp_preprossesing(Function &F){
           currLP->L = ompLoop;
           currLP->isOmpLoop = true;
           currLP->barrier = false;
+          countBarrier = 0;
           currLP->IV = getInductionVariable(ompLoop, SE);
           LoopProfiles.insert(currLP);
         }
