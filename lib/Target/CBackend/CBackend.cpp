@@ -918,7 +918,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
     }
 }
 
-Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini){
+Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset){
   bool startSearching = prevFini ? false : true;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(&*I == initCI) break;
@@ -929,13 +929,15 @@ Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFi
       if(store->getOperand(1) == ub){
         BinaryOperator *subInst = dyn_cast<BinaryOperator>(store->getOperand(0));
         if(subInst && (subInst->getOpcode() == Instruction::Add || subInst->getOpcode() == Instruction::FAdd)){
-          if(ConstantInt *minusOne = dyn_cast<ConstantInt>(subInst->getOperand(1)))
-            if(minusOne->getSExtValue() == -1){
-              Value *opnd0 = subInst->getOperand(0);
-              //if(LoadInst* ld = dyn_cast<LoadInst>(opnd0)) return ld->getPointerOperand();
-              //else return opnd0;
-              return opnd0;
-            }
+          if(ConstantInt *OffSetMinusOne = dyn_cast<ConstantInt>(subInst->getOperand(1))){
+            //if(minusOne->getSExtValue() == -1){
+            Value *opnd0 = subInst->getOperand(0);
+            offset = OffSetMinusOne->getSExtValue()+1;
+            //if(LoadInst* ld = dyn_cast<LoadInst>(opnd0)) return ld->getPointerOperand();
+            //else return opnd0;
+            return opnd0;
+            //}
+          }
         }
       }
   }
@@ -979,7 +981,9 @@ void CWriter::omp_preprossesing(Function &F){
           ompLP->lb = lb;
 
           //find ub & incr
-          ompLP->ub = findOriginalUb(F, CI->getArgOperand(5), initCI, finiCI);
+          int ubOffset = 0;
+          ompLP->ub = findOriginalUb(F, CI->getArgOperand(5), initCI, finiCI, ubOffset);
+          ompLP->ubOffset = ubOffset;
           ompLP->incr = CI->getArgOperand(7);
           currLP = ompLP;
         }
@@ -6342,6 +6346,8 @@ void CWriter::printLoopNew(Loop *L) {
       errs() << "SUSAN: condInst: " << *condInst << "\n";
       printCmpOperator(dyn_cast<ICmpInst>(condInst));
       writeOperandInternal(LP->ub);
+      if(LP->ubOffset)
+        Out << LP->ubOffset;
     } else {
       errs() << "SUSAN: condInst:" << *condInst << "\n";
       if(negateCondition)

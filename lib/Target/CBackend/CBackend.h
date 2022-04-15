@@ -65,6 +65,7 @@ typedef struct CBERegion{
 typedef struct ForLoopProfile{
   Loop *L;
   Value *ub;
+  int ubOffset;
   Value *lb;
   Value *incr;
   PHINode *IV;
