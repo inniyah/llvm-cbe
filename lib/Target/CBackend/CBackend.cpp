@@ -995,8 +995,23 @@ void CWriter::omp_preprossesing(Function &F){
           for(auto &BB : F){
             if(DT->dominates(initCI->getParent(), &BB)
                 && PDT->dominates(finiCI->getParent(), &BB)){
-              ompLoop = LI->getLoopFor(&BB);
-              if(ompLoop) break;
+              Loop *dominatedLoop = LI->getLoopFor(&BB);
+              if(!dominatedLoop) continue;
+
+              bool loopIsDominated = true;
+              for (unsigned i = 0, e = dominatedLoop->getBlocks().size(); i != e; ++i) {
+                BasicBlock *domBB = dominatedLoop->getBlocks()[i];
+                if(!DT->dominates(initCI->getParent(), domBB)
+                    || !PDT->dominates(finiCI->getParent(), domBB)){
+                  loopIsDominated = false;
+                  break;
+                }
+              }
+
+              if(!loopIsDominated) continue;
+
+              ompLoop = dominatedLoop;
+              break;
             }
           }
           assert(ompLoop && "didn't find omp loop?\n");
@@ -5821,11 +5836,12 @@ void CWriter::printFunction(Function &F) {
       }
     }*/
 
-    for(auto LP : LoopProfiles)
-      if(LP->isOmpLoop){
-        errs() << "SUSAN: print omploop: " << *LP->L << "\n";
+    for(auto LP : LoopProfiles){
+      if(!LP->L->getParentLoop()){
+        errs() << "SUSAN: print loop: " << *LP->L << "\n";
         printLoopNew(LP->L);
       }
+    }
   } else { // print basic blocks
     std::queue<BasicBlock*> toVisit;
     std::set<BasicBlock*> visited;
