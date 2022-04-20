@@ -1161,6 +1161,13 @@ void CWriter::preprocessSkippableBranches(Function &F){
           && (cmp->getPredicate() == CmpInst::ICMP_SGT
               || cmp->getPredicate() == CmpInst::ICMP_UGT))
                 isDoWhileReverse = true;
+      else if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub)){
+        Value *ldPtr = ldUB->getPointerOperand();
+        if(ldPtr == comparedVal
+          && (cmp->getPredicate() == CmpInst::ICMP_SGT
+              || cmp->getPredicate() == CmpInst::ICMP_UGT))
+                isDoWhileReverse = true;
+      }
 
       bool isCheckingLB = false;
       if(LP->lbAlloca == comparedVal
