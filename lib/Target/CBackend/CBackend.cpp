@@ -997,8 +997,23 @@ void CWriter::omp_preprossesing(Function &F){
           for(auto &BB : F){
             if(DT->dominates(initCI->getParent(), &BB)
                 && PDT->dominates(finiCI->getParent(), &BB)){
-              ompLoop = LI->getLoopFor(&BB);
-              if(ompLoop) break;
+              Loop *dominatedLoop = LI->getLoopFor(&BB);
+               if(!dominatedLoop) continue;
+
+               bool loopIsDominated = true;
+               for (unsigned i = 0, e = dominatedLoop->getBlocks().size(); i != e; ++i) {
+                 BasicBlock *domBB = dominatedLoop->getBlocks()[i];
+                 if(!DT->dominates(initCI->getParent(), domBB)
+                     || !PDT->dominates(finiCI->getParent(), domBB)){
+                   loopIsDominated = false;
+                   break;
+                 }
+               }
+
+               if(!loopIsDominated) continue;
+
+               ompLoop = dominatedLoop;
+               break;
             }
           }
           assert(ompLoop && "didn't find omp loop?\n");
@@ -1103,6 +1118,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
     Instruction *condInst = findCondInst(LP->L, negateCondition);
     Value *ub = condInst->getOperand(1);
     LP->ub = findOriginalValue(ub);
+    errs() << "none omp loop ub: " << *LP->ub << "\n";
 
     LP->lbAlloca = nullptr;
     //LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
