@@ -6062,12 +6062,12 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
       Out << ";\n";
 }
 
-void CWriter::keepIVUnrelatedInsts(BasicBlock *skipBB, std::set<Instruction*> &InstsKeptFromSkipBlock){
+void CWriter::keepIVUnrelatedInsts(BasicBlock *skipBB, Instruction *condInst, std::set<Instruction*> &InstsKeptFromSkipBlock){
   for(auto &I : *skipBB){
-    if(isa<BranchInst>(&I) || isIVIncrement(cast<Value>(&I))) continue;
+    if(isa<BranchInst>(&I) || isIVIncrement(cast<Value>(&I)) || &I == condInst) continue;
     bool skipIVRelated = false;
     for(User *U : I.users())
-      if(isIVIncrement(U) || isa<BranchInst>(U)){
+      if(isIVIncrement(U) || isa<BranchInst>(U) || U == condInst){
         skipIVRelated = true;
         break;
       }
@@ -6192,7 +6192,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set
 
   std::set<Instruction*> InstsKeptFromSkipBlock;
   if(skipBlock){
-    keepIVUnrelatedInsts(skipBlock, InstsKeptFromSkipBlock);
+    keepIVUnrelatedInsts(skipBlock, condInst, InstsKeptFromSkipBlock);
     errs() << "SUSAN: skip Block:" << skipBlock->getName() << "\n";
   }
 
@@ -6480,6 +6480,7 @@ void CWriter::printLoopNew(Loop *L) {
     findCondRelatedInsts(condBlock, condRelatedInsts);
     for(auto condRelatedInst : condRelatedInsts){
       Instruction *inst = cast<Instruction>(condRelatedInst);
+      errs() << "SUSAN: condrelatedinst:" << *inst << "\n";
       if(isIVIncrement(inst) ||isa<PHINode>(inst)
           || isa<BranchInst>(inst) || isa<CmpInst>(inst)
           || isInlinableInst(*inst) || inst == LP->incr)
@@ -8368,6 +8369,7 @@ void CWriter::visitCallInst(CallInst &I) {
    * OpenMP: skip omp runtime call
    */
   if(Function *F = I.getCalledFunction()){
+    if(F->getName() == "__kmpc_barrier") return;
     if(F->getName() == "__kmpc_fork_call"){
       Out << "  #pragma omp parallel \n" << "\n";
 
