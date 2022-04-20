@@ -6232,8 +6232,8 @@ void CWriter::initializeLoopPHIs(Loop *L){
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     for (BasicBlock::iterator I = BB->begin(); isa<PHINode>(I); ++I) {
-      if(isSkipableInst(&*I)) continue;
       PHINode *PN = cast<PHINode>(I);
+      if(deadInsts.find(PN) != deadInsts.end()) continue;
       if(isInductionVariable(cast<Value>(PN))) continue;
       for(unsigned i=0; i<PN->getNumIncomingValues(); ++i){
         BasicBlock* predBB = PN->getIncomingBlock(i);
@@ -6253,7 +6253,7 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
   for(auto bb2phi : PHIValues2Print){
     if(bb2phi.first == BB){
       PHINode *phi = bb2phi.second;
-      if(isSkipableInst(phi)) continue;
+      if(deadInsts.find(phi) != deadInsts.end()) continue;
       Out << std::string(2, ' ');
       Out << GetValueName(phi) << " = ";
       writeOperandInternal(phi->getIncomingValueForBlock(BB));
