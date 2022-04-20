@@ -71,6 +71,7 @@ typedef struct ForLoopProfile{
   PHINode *IV;
   bool isOmpLoop;
   bool barrier;
+  Value* lbAlloca;
 } ForLoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
@@ -129,6 +130,8 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<BranchInst*, int> deadBranches;
   bool omp_declarePrivate;
   bool isSkipableInst(Instruction* inst);
+  void EliminateDeadInsts(Function &F);
+  std::set<Instruction*> deadInsts;
 
   CBERegion topRegion;
 

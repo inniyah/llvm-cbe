@@ -975,6 +975,8 @@ void CWriter::omp_preprossesing(Function &F){
 
           // find the value stored into lb
           lb = CI->getArgOperand(4);
+          ompLP->lbAlloca = lb;
+          errs() << "SUSAN: lbAlloca: " << *lb << "\n";
           for(User *U : lb->users()){
             if(StoreInst *store = dyn_cast<StoreInst>(U))
               lb = store->getOperand(0);
@@ -1102,7 +1104,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
     Value *ub = condInst->getOperand(1);
     LP->ub = findOriginalValue(ub);
 
-
+    LP->lbAlloca = nullptr;
     //LP->ub = nullptr; //note: ub is included in condinst unless it is a omp loop
     LP->isOmpLoop = false;
 
@@ -1138,6 +1140,7 @@ void CWriter::preprocessSkippableBranches(Function &F){
       && cmp->getPredicate() != CmpInst::ICMP_EQ) continue;
 
     Value* comparedVal = cmp->getOperand(0);
+    Value* opnd1 = cmp->getOperand(1);
     comparedVal = findOriginalValue(comparedVal);
     errs() << "SUSAN: compared val:" << *comparedVal << "\n";
 
@@ -1159,27 +1162,46 @@ void CWriter::preprocessSkippableBranches(Function &F){
               || cmp->getPredicate() == CmpInst::ICMP_UGT))
                 isDoWhileReverse = true;
 
-      if(!isDoWhileReverse && !isMasterCall) continue;
+      bool isCheckingLB = false;
+      if(LP->lbAlloca == comparedVal
+          && (cmp->getPredicate() == CmpInst::ICMP_SGT
+              || cmp->getPredicate() == CmpInst::ICMP_UGT))
+        isCheckingLB = true;
+
+      if(!isDoWhileReverse && !isMasterCall && !isCheckingLB) continue;
 
 
       errs() << "SUSAN: loop is: " << *LP->L << "\n";
       errs() << "branch: " << *br << "\n";
       errs() << "ub: " << *LP->ub << "\n";
+      errs() << "lb: " << *LP->lb << "\n";
 
       if(isDoWhileReverse){
-        CBERegion *R = findRegionOfBlock(br->getParent());
+        //CBERegion *R = findRegionOfBlock(br->getParent());
 
-        if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
+        //if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
+        if(cmp->getPredicate() == CmpInst::ICMP_SGT
+            || cmp->getPredicate() == CmpInst::ICMP_UGT){
           errs() << "added br to dead branches 0" << *br << "\n";
           deadBranches[br] = 0;
         }
-        else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
+        else if(cmp->getPredicate() == CmpInst::ICMP_SLE
+            || cmp->getPredicate() == CmpInst::ICMP_ULE){
+        //else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
           errs() << "added br to dead branches 1" << *br << "\n";
           deadBranches[br] = 1;
         }
-      } else{
+      } else if(isMasterCall){
         deadBranches[br] = 1;
+      } else if(isCheckingLB){
+        Value *opnd1 = cmp->getOperand(1);
+        if(SelectInst *sel = dyn_cast<SelectInst>(opnd1)){
+          //LoadInst *ld = dyn_cast<LoadInst>(sel->getTrueValue());
+          //if(ld && ld->getPointerOperand() == LP->ub)
+            deadBranches[br] = 1;
+        }
       }
+
     }
 
   }
@@ -1207,6 +1229,77 @@ void CWriter::preprocessSkippableInsts(Function &F){
         continue;
       }
     }
+  }
+}
+
+void CWriter::EliminateDeadInsts(Function &F){
+  //first record all the liveins for openmp functions
+  //any instructions that's not in an omp loop or not an livein should be eliminated
+  if(IS_OPENMP_FUNCTION){
+    for(auto LP : LoopProfiles)
+      if(LP->isOmpLoop)
+        OMP_RecordLiveIns(LP);
+
+
+    for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+      Instruction *inst = &*I;
+      bool isLoopLiveIn = false;
+      for(auto [loop, liveins] : omp_liveins)
+        if(liveins.find(inst) != liveins.end()){
+          errs() << "SUSAN: livein: " << *inst << "\n";
+          isLoopLiveIn = true;
+          break;
+        }
+      if(isLoopLiveIn) continue;
+      Loop *L = LI->getLoopFor(inst->getParent());
+      bool isOmpLoop = false;
+      for(auto LP : LoopProfiles){
+        if(LP->L == L && LP->isOmpLoop){
+          isOmpLoop = true;
+        }
+      }
+      if(isOmpLoop) continue;
+
+      bool nestedInOmpLoop = false;
+      while(L){
+        for(auto LP : LoopProfiles){
+          if(LP->L == L && LP->isOmpLoop){
+            errs() << "nested in omploop:" << *inst << "\n";
+            nestedInOmpLoop = true;
+            break;
+          }
+        }
+        L = L->getParentLoop();
+      }
+      if(nestedInOmpLoop) continue;
+
+      errs() << "SUSAN: adding to deadInsts" << *inst << "\n";
+      deadInsts.insert(inst);
+    }
+
+    for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+      PHINode *phi = dyn_cast<PHINode>(&*I);
+      if(!phi) continue;
+
+      bool isDead = true;
+      for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
+        Instruction *val = dyn_cast<Instruction>(phi->getIncomingValue(i));
+        if(!val){
+          isDead = false;
+          break;
+        }
+        if(deadInsts.find(val) == deadInsts.end()){
+          isDead = false;
+          break;
+        }
+      }
+
+      if(isDead){
+        errs() << "SUSAN: add phi to deadInst: " << *I << "\n";
+        deadInsts.insert(&*I);
+      }
+    }
+
   }
 }
 
@@ -1268,6 +1361,7 @@ bool CWriter::runOnFunction(Function &F) {
 
    preprocessLoopProfiles(F);
    preprocessSkippableBranches(F);
+   EliminateDeadInsts(F);
    printFunction(F);
 
   LI = nullptr;
@@ -5778,9 +5872,9 @@ void CWriter::printFunction(Function &F) {
    * Only prints the loop
    */
   if(IS_OPENMP_FUNCTION){
-    for(auto LP : LoopProfiles)
-      if(LP->isOmpLoop)
-        OMP_RecordLiveIns(LP);
+    //for(auto LP : LoopProfiles)
+    //  if(LP->isOmpLoop)
+    //    OMP_RecordLiveIns(LP);
     //find all the local variables to declare
     for(auto LP : LoopProfiles){
       std::set<std::string> declaredLocals;
@@ -5811,7 +5905,7 @@ void CWriter::printFunction(Function &F) {
       DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
       //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
     }
-
+  }
     /*for(auto LP : LoopProfiles){
       if(!LP->isOmpLoop) continue;
       for(auto I : omp_liveins[LP->L]){
@@ -5821,12 +5915,12 @@ void CWriter::printFunction(Function &F) {
       }
     }*/
 
-    for(auto LP : LoopProfiles)
-      if(LP->isOmpLoop){
-        errs() << "SUSAN: print omploop: " << *LP->L << "\n";
-        printLoopNew(LP->L);
-      }
-  } else { // print basic blocks
+   // for(auto LP : LoopProfiles)
+   //   if(LP->isOmpLoop){
+   //     errs() << "SUSAN: print omploop: " << *LP->L << "\n";
+   //     printLoopNew(LP->L);
+   //   }
+  //} else { // print basic blocks
     std::queue<BasicBlock*> toVisit;
     std::set<BasicBlock*> visited;
     toVisit.push(&F.getEntryBlock());
@@ -5887,9 +5981,10 @@ void CWriter::printFunction(Function &F) {
         }
       }
     }
-  }
+  //}
 
   for(auto BB : delayedBBs){
+    errs() << "printing BB:" << BB->getName() << "at 5964\n";
     printBasicBlock(BB);
     times2bePrinted[BB]--;
   }
@@ -5928,6 +6023,7 @@ void CWriter::printCmpOperator(ICmpInst *icmp){
 }
 
 void CWriter::printInstruction(Instruction *I, bool printSemiColon){
+    errs() << "SUSAN: printing instruction " << *I << " at 6003\n";
     if(omp_SkipVals.find(I) != omp_SkipVals.end()) return;
     errs() << "SUSAN: did omp_SkipVals skips my inst?\n";
     Out << "  ";
@@ -6112,6 +6208,7 @@ void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set
             continue;
           }
         }*/
+        errs() << "printing BB:" << BB->getName() << "at 6187\n";
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
@@ -6121,8 +6218,10 @@ void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set
         else printLoop(BBLoop);
       }
     } else {
-      for(auto I : InstsKeptFromSkipBlock)
+      for(auto I : InstsKeptFromSkipBlock){
+        errs() << "SUSAN: printing instruction: " << *I << " at 6198\n";
         printInstruction(I);
+      }
       times2bePrinted[skipBlock]--;
     }
   }
@@ -6133,6 +6232,7 @@ void CWriter::initializeLoopPHIs(Loop *L){
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
     BasicBlock *BB = L->getBlocks()[i];
     for (BasicBlock::iterator I = BB->begin(); isa<PHINode>(I); ++I) {
+      if(isSkipableInst(&*I)) continue;
       PHINode *PN = cast<PHINode>(I);
       if(isInductionVariable(cast<Value>(PN))) continue;
       for(unsigned i=0; i<PN->getNumIncomingValues(); ++i){
@@ -6153,6 +6253,7 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
   for(auto bb2phi : PHIValues2Print){
     if(bb2phi.first == BB){
       PHINode *phi = bb2phi.second;
+      if(isSkipableInst(phi)) continue;
       Out << std::string(2, ' ');
       Out << GetValueName(phi) << " = ";
       writeOperandInternal(phi->getIncomingValueForBlock(BB));
@@ -6262,6 +6363,7 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val){
 bool CWriter::isSkipableInst(Instruction* inst){
     if(omp_SkipVals.find(inst) != omp_SkipVals.end()) return true;
     //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) return true;
+    if(deadInsts.find(inst) != deadInsts.end()) return true;
     if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()) return true;
     if(isa<PHINode>(inst)) return true;
     if(isInlinableInst(*inst)) return true;
@@ -6373,6 +6475,7 @@ void CWriter::printLoopNew(Loop *L) {
     errs() << "incr: " << *LP->incr << "\n";
 
     //print init statement
+    errs() << "SUSAN: printing IV" << *LP->IV << "\n";
     Out << GetValueName(LP->IV) << " = ";
     writeOperandInternal(LP->lb);
     Out << "; ";
@@ -6455,8 +6558,10 @@ void CWriter::printLoopNew(Loop *L) {
     }
     else{
       BasicBlock *loopBB = L->getBlocks()[0];
-      for (BasicBlock::iterator I = loopBB->begin(); isa<PHINode>(I); ++I)
+      for (BasicBlock::iterator I = loopBB->begin(); isa<PHINode>(I); ++I){
+        errs() << "SUSAN: printing instruction: " << *I << " at 6535\n";
         printInstruction(&*I);
+      }
     }
 
     if(!negateCondition) Out << "while (";
@@ -6596,6 +6701,7 @@ if( NATURAL_CONTROL_FLOW ){
     }
 
     if (!isInlinableInst(*II) && !isDirectAlloca(&*II)) {
+      errs() << "SUSAN: printing instruction " << *II << " at 6678\n";
       if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
         Out << "  ";
       else
@@ -7078,6 +7184,7 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
     auto bbs = isElseBranch ? R->elseBBs : R->thenBBs;
     for(auto bb : bbs){
+      errs() << "printing BB in emitIfBlock" << bb->getName() << "\n";
       if (Loop *L = LI->getLoopFor(bb)) {
         if (L->getHeader() == bb && L->getParentLoop() == nullptr && times2bePrinted[bb]){
           errs() << "SUSAN: printing loop " << bb->getName() << " at 6677\n";
@@ -7086,10 +7193,12 @@ void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
           else
             printLoop(L);
         } else {
+          errs() << "printing BB:" << bb->getName() << "at 7164\n";
           printBasicBlock(bb);
           times2bePrinted[bb]--;
         }
       } else {
+          errs() << "printing BB:" << bb->getName() << "at 7169\n";
           printBasicBlock(bb);
           times2bePrinted[bb]--;
       }
@@ -7213,6 +7322,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
             ++I){
           Instruction *II = cast<Instruction>(I);
           if (!isInlinableInst(*II) && !isDirectAlloca(&*II)){
+            errs() << "SUSAN: printing instruction: " << *II << " at 7297\n";
             printInstruction(II);
           }
         }
@@ -7231,6 +7341,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
           if(isa<ReturnInst>(retBB->getTerminator())){
             //printPHICopiesForSuccessor(exitBB, retBB, 2);
             printPHIsIfNecessary(exitBB);
+            errs() << "printing BB:" << retBB->getName() << "at 7311\n";
             printBasicBlock(retBB);
             times2bePrinted[retBB]--;
             Out << "    }\n";
@@ -9331,6 +9442,7 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
 }
 
 void CWriter::visitLoadInst(LoadInst &I) {
+  errs() << "SUSAN: curinstr before loadinst: " << *CurInstr << "\n";
   CurInstr = &I;
 
   writeMemoryAccess(I.getOperand(0), I.getType(), I.isVolatile(),
