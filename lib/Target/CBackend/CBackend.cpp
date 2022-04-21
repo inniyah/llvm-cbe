@@ -1378,6 +1378,15 @@ bool CWriter::runOnFunction(Function &F) {
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
 
+  /*
+   * OpenMP: preprosessings
+   */
+  LoopProfiles.clear();
+  if(IS_OPENMP_FUNCTION)
+   omp_preprossesing(F);
+  preprocessSkippableInsts(F);
+  preprocessLoopProfiles(F);
+  preprocessSkippableBranches(F);
   //SUSAN: determine whether the function can be compiled without gotos
   std::set<BasicBlock*> visitedBBs;
   markIfBranches(F, &visitedBBs); //2
@@ -1393,7 +1402,6 @@ bool CWriter::runOnFunction(Function &F) {
 
   markLoopIrregularExits(F); //1
   markGotoBranches(F);
-  preprocessSkippableInsts(F);
   preprossesPHIs2Print(F);
   //NodeSplitting(F); PDT->recalculate(F); //3
   //markIfBranches(F, &visitedBBs); //4
@@ -1403,15 +1411,8 @@ bool CWriter::runOnFunction(Function &F) {
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
 
-  /*
-   * OpenMP: preprosessings
-   */
-   LoopProfiles.clear();
-   if(IS_OPENMP_FUNCTION)
-    omp_preprossesing(F);
 
-   preprocessLoopProfiles(F);
-   preprocessSkippableBranches(F);
+
    EliminateDeadInsts(F);
    printFunction(F);
 
