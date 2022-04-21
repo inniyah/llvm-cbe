@@ -7230,6 +7230,33 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 
         toVisit.pop();
 
+        BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator());
+        if(br && deadBranches.find(br) != deadBranches.end()){
+          BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
+          bool alreadyVisited = false;
+          for(auto visitedEdge : visited)
+            if(visitedEdge.first == currBB && visitedEdge.second == succBB)
+              alreadyVisited = true;
+
+          bool backEdgeDetected = false;
+          for(auto backedge : backEdges)
+            if(backedge.first == currBB && backedge.second  == succBB)
+              backEdgeDetected = true;
+
+          Loop *L = LI->getLoopFor(succBB);
+          if(L && L->getLoopLatch() == currBB){
+            errs() << "SUSAN: found latch" << currBB->getName() << "\n";
+            backEdgeDetected = true;
+          }
+
+          if(!alreadyVisited && !backEdgeDetected){
+            visitedNodes.insert(succBB);
+            visited.insert(std::make_pair(currBB,succBB));
+            toVisit.push(std::make_pair(currBB,succBB));
+          }
+          continue;
+        }
+
         for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
             BasicBlock *succBB = *succ;
             bool alreadyVisited = false;
