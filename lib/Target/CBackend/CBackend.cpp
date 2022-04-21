@@ -1260,12 +1260,40 @@ void CWriter::EliminateDeadInsts(Function &F){
   //any instructions that's not in an omp loop or not an livein should be eliminated
   if(IS_OPENMP_FUNCTION){
     for(auto LP : LoopProfiles)
-      if(LP->isOmpLoop)
+      //if(LP->isOmpLoop)
         OMP_RecordLiveIns(LP);
 
 
     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
       Instruction *inst = &*I;
+      if(inst->getName().contains("kmpc_loc")){
+        errs() << "SUSAN: kmpc_loc found!!!\n";
+        deadInsts.insert(inst);
+
+        std::set<Instruction*> visited;
+        std::queue<Instruction*> toVisit;
+        visited.insert(inst);
+        toVisit.push(inst);
+        deadInsts.insert(inst);
+
+        while(!toVisit.empty()){
+          Instruction *currInst = toVisit.front();
+          toVisit.pop();
+
+          for(User *U : currInst->users()){
+            Instruction *userInst = dyn_cast<Instruction>(U);
+            if(userInst && visited.find(userInst) ==visited.end() ){
+              errs() << "SUSAN: deadInst from kmpc_loc: " << *userInst << "\n";
+              visited.insert(userInst);
+              toVisit.push(userInst);
+              deadInsts.insert(userInst);
+            }
+          }
+        }
+        continue;
+      }
+
+
       bool isLoopLiveIn = false;
       for(auto [loop, liveins] : omp_liveins)
         if(liveins.find(inst) != liveins.end()){
@@ -5901,7 +5929,27 @@ void CWriter::printFunction(Function &F) {
     //find all the local variables to declare
     for(auto LP : LoopProfiles){
       std::set<std::string> declaredLocals;
-      if(!LP->isOmpLoop) continue;
+      //if(!LP->isOmpLoop) continue;
+      if(!LP->isOmpLoop){
+        bool nestedInOmpLoop = false;
+        Loop *L = LP->L->getParentLoop();
+        while(L){
+          for(auto lp : LoopProfiles)
+            if(lp->L == L && lp->isOmpLoop){
+              nestedInOmpLoop = true;
+              break;
+            }
+          if(nestedInOmpLoop) break;
+          L = L->getParentLoop();
+        }
+        if(nestedInOmpLoop){
+          bool isDeclared = false;
+          DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+          errs() << "SUSAN: adding iv to declared locals: " << *LP->IV << "\n";
+          omp_declaredLocals[L].insert(LP->IV);
+          continue;
+        }
+      }
       Loop *L = LP->L;
       std::set<Value*> skipInsts;
       bool negateCondition;
@@ -5914,6 +5962,8 @@ void CWriter::printFunction(Function &F) {
           Instruction *inst = &I;
           if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
           //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
+          //if(deadInsts.find(inst) != deadInsts.end()) continue;
+          if(isSkipableInst(inst)) continue;
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           bool isDeclared = false;
@@ -6064,6 +6114,7 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
 
 void CWriter::keepIVUnrelatedInsts(BasicBlock *skipBB, Instruction *condInst, std::set<Instruction*> &InstsKeptFromSkipBlock){
   for(auto &I : *skipBB){
+    if(isSkipableInst(&I)) continue;
     if(isa<BranchInst>(&I) || isIVIncrement(cast<Value>(&I)) || &I == condInst) continue;
     bool skipIVRelated = false;
     for(User *U : I.users())
