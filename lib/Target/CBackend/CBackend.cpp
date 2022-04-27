@@ -7660,10 +7660,11 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         Out << ")";
       }
       else if(opcode == Instruction::UDiv || opcode == Instruction::FDiv){
-        //Out << "(";
+        Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
         writeOperand(I.getOperand(1), ContextCasted);
+        Out << ")";
       }
       else if(opcode == Instruction::SDiv){
         Type* op0Ty = (I.getOperand(0))->getType();
