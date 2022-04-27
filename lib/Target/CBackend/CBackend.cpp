@@ -136,6 +136,7 @@ static bool isNegative(Value *V){
 }
 
 static bool isEmptyType(Type *Ty) {
+  if(!Ty) return false;
   if (StructType *STy = dyn_cast<StructType>(Ty))
     return STy->getNumElements() == 0 ||
            std::all_of(STy->element_begin(), STy->element_end(), isEmptyType);
@@ -391,7 +392,8 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
                     directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
     bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
-    if(!trueBrOnly && !falseBrOnly){
+    bool returnDominated = dominatedByReturn(brBB);
+    if(!trueBrOnly && !falseBrOnly && !returnDominated){
       trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
       falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
     }
@@ -422,7 +424,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
         return;
     }
 
-    if(trueBrOnly){
+    if(trueBrOnly && !returnDominated){
         recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
           currRegion);
 
@@ -440,7 +442,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
       recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB, currRegion, true);
     }
     //Case 3: only print if body with reveresed case
-    else if(falseBrOnly){
+    else if(falseBrOnly && !returnDominated){
       recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
             currRegion);
 
@@ -481,6 +483,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
         currRegion->elseBBs.push_back(ret);
       }
    }
+
   errs() << "=================SUSAN: END OF marking region : " << br->getParent()->getName() << "==================\n";
 }
 
@@ -893,6 +896,8 @@ Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
 }
 
 void CWriter::preprossesPHIs2Print(Function &F){
+  std::map<PHINode*, PHINode*> phiLoops;
+
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
     if(PHINode *phi = dyn_cast<PHINode>(&*I)){
 
@@ -908,11 +913,27 @@ void CWriter::preprossesPHIs2Print(Function &F){
         if(isa<Constant>(phiVal) || isa<LoadInst>(phiVal)){
           PHIValues2Print.insert(std::make_pair(predBB, phi));
         }
+
+        if(PHINode *incomingPhi = dyn_cast<PHINode>(phiVal)){
+          //detect a circle
+          for(unsigned i=0; i<incomingPhi->getNumIncomingValues(); ++i)
+            if(incomingPhi->getIncomingValue(i) == phi){
+              phiLoops[incomingPhi] = phi;
+              break;
+            }
+        }
+
+        PHINode *replaceVal = phi;
+        if(phiLoops.find(phi) != phiLoops.end()){
+          if(phiLoops[phi] == phiVal) continue;
+          replaceVal = phiLoops[phi];
+        }
+
         if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
           if(deleteAndReplaceInsts.find(incomingInst) != deleteAndReplaceInsts.end())
-            InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = phi;
+            InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = replaceVal;
           else
-            InstsToReplaceByPhi[phiVal] = phi;
+            InstsToReplaceByPhi[phiVal] = replaceVal;
         }
       }
     }
@@ -2923,6 +2944,7 @@ std::string demangleVariableName(StringRef var){
   return newVar;
 }
 std::string CWriter::GetValueName(Value *Operand) {
+  errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
     return GetValueName(InstsToReplaceByPhi[Operand]);
@@ -4736,7 +4758,7 @@ void CWriter::generateHeader(Module &M) {
     ArrayType *ATy = dyn_cast<ArrayType>(*it);
     VectorType *VTy = dyn_cast<VectorType>(*it);
     //errs() << "SUSAN: STy: " << *STy << "\n";
-    errs() << "SUSAN: ATy: " << *ATy << "\n";
+    //errs() << "SUSAN: ATy: " << *ATy << "\n";
     //errs() << "SUSAN: VTy: " << *VTy << "\n";
     unsigned e = (STy ? STy->getNumElements()
                       : (ATy ? ATy->getNumElements() : NumberOfElements(VTy)));
@@ -6609,16 +6631,19 @@ void CWriter::printLoopNew(Loop *L) {
     //else icmp = dyn_cast<ICmpInst>(condInst);
 
     // print live-in declarations
-    for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
-      Instruction *inst = cast<Instruction>(I);
-      if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
-         Out << "  ";
-         printTypeName(Out, inst->getType(), false)
-                        << ' ' << GetValueName(inst);
-         Out << ";\n";
-         declaredInsts.insert(inst);
-      }
-    }
+   // errs() << "header: " << *header << "\n";
+   // errs() << "condInst: " << *condInst << "\n";
+   // for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
+   //   Instruction *inst = cast<Instruction>(I);
+   //   errs() << "SUSAN: inst" << *inst << "\n";
+   //   if(inst && declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
+   //      Out << "  ";
+   //      printTypeName(Out, inst->getType(), false)
+   //                     << ' ' << GetValueName(inst);
+   //      Out << ";\n";
+   //      declaredInsts.insert(inst);
+   //   }
+   // }
 
     // print prologue
     if(L->getBlocks().size() > 1){
@@ -7230,6 +7255,33 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
 
         toVisit.pop();
 
+        BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator());
+        if(br && deadBranches.find(br) != deadBranches.end()){
+          BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
+          bool alreadyVisited = false;
+          for(auto visitedEdge : visited)
+            if(visitedEdge.first == currBB && visitedEdge.second == succBB)
+              alreadyVisited = true;
+
+          bool backEdgeDetected = false;
+          for(auto backedge : backEdges)
+            if(backedge.first == currBB && backedge.second  == succBB)
+              backEdgeDetected = true;
+
+          Loop *L = LI->getLoopFor(succBB);
+          if(L && L->getLoopLatch() == currBB){
+            errs() << "SUSAN: found latch" << currBB->getName() << "\n";
+            backEdgeDetected = true;
+          }
+
+          if(!alreadyVisited && !backEdgeDetected){
+            visitedNodes.insert(succBB);
+            visited.insert(std::make_pair(currBB,succBB));
+            toVisit.push(std::make_pair(currBB,succBB));
+          }
+          continue;
+        }
+
         for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
             BasicBlock *succBB = *succ;
             bool alreadyVisited = false;
@@ -7281,6 +7333,42 @@ void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
    }
 }
 
+
+bool CWriter::dominatedByReturn(BasicBlock* brBB){
+  Function *F = brBB->getParent();
+  BasicBlock *returnBB = nullptr;
+  for(auto &BB : *F)
+    if(isa<ReturnInst>(BB.getTerminator())){
+      returnBB = &BB;
+      break;
+    }
+
+  if(!returnBB) return false;
+
+
+  std::set<BasicBlock*> visited;
+  std::queue<BasicBlock*> toVisit;
+  visited.insert(brBB);
+  toVisit.push(brBB);
+
+  while(!toVisit.empty()){
+    BasicBlock* currBB = toVisit.front();
+    toVisit.pop();
+
+    if(currBB != brBB && currBB != returnBB && PDT->dominates(currBB, brBB))
+      return false;
+
+    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+      BasicBlock *succBB = *succ;
+      if(visited.find(succBB) == visited.end()){
+        visited.insert(succBB);
+        toVisit.push(succBB);
+      }
+    }
+  }
+
+  return true;
+}
 
 void CWriter::naturalBranchTranslation(BranchInst &I){
   errs() << "SUSAN: emitting branch: " << I << "\n";
@@ -7367,17 +7455,20 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   //                   && !( isPotentiallyReachable(falseStartBB, brBB) &&
   //                     isPotentiallyReachable(brBB, trueStartBB) );
 
-  bool trueBrOnly = PDT->dominates(falseStartBB, trueStartBB) &&
-                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
+
+  bool trueBrOnly = (PDT->dominates(falseStartBB, trueStartBB) &&
+                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB));
   bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
+  bool returnDominated = dominatedByReturn(brBB);
 
-  if(!trueBrOnly && !falseBrOnly){
+  if(!trueBrOnly && !falseBrOnly && !returnDominated){
     trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
     falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
   }
 
-  if(falseBrOnly){
+  if(falseBrOnly && !returnDominated){
+    errs() << "SUSAN: false branch only!!\n" << I << "\n";
     Out << "  if (!";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
@@ -7432,7 +7523,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 
 
     //Case 2: only print if body
-    if(trueBrOnly){
+    if(trueBrOnly || returnDominated){
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       //printPHIsIfNecessary()
       emitIfBlock(cbeRegion);
@@ -7452,6 +7543,9 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     }
 
     Out << "}\n";
+
+    if(returnDominated)
+      emitIfBlock(cbeRegion, true);
 
   Out << "\n";
 }
