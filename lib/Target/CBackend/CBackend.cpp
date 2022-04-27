@@ -136,6 +136,7 @@ static bool isNegative(Value *V){
 }
 
 static bool isEmptyType(Type *Ty) {
+  if(!Ty) return false;
   if (StructType *STy = dyn_cast<StructType>(Ty))
     return STy->getNumElements() == 0 ||
            std::all_of(STy->element_begin(), STy->element_end(), isEmptyType);
@@ -893,6 +894,8 @@ Loop* CWriter::findLoopAccordingTo(Function &F, Value *bound){
 }
 
 void CWriter::preprossesPHIs2Print(Function &F){
+  std::map<PHINode*, PHINode*> phiLoops;
+
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
     if(PHINode *phi = dyn_cast<PHINode>(&*I)){
 
@@ -908,11 +911,27 @@ void CWriter::preprossesPHIs2Print(Function &F){
         if(isa<Constant>(phiVal) || isa<LoadInst>(phiVal)){
           PHIValues2Print.insert(std::make_pair(predBB, phi));
         }
+
+        if(PHINode *incomingPhi = dyn_cast<PHINode>(phiVal)){
+          //detect a circle
+          for(unsigned i=0; i<incomingPhi->getNumIncomingValues(); ++i)
+            if(incomingPhi->getIncomingValue(i) == phi){
+              phiLoops[incomingPhi] = phi;
+              break;
+            }
+        }
+
+        PHINode *replaceVal = phi;
+        if(phiLoops.find(phi) != phiLoops.end()){
+          if(phiLoops[phi] == phiVal) continue;
+          replaceVal = phiLoops[phi];
+        }
+
         if(Instruction *incomingInst = dyn_cast<Instruction>(phiVal)){
           if(deleteAndReplaceInsts.find(incomingInst) != deleteAndReplaceInsts.end())
-            InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = phi;
+            InstsToReplaceByPhi[deleteAndReplaceInsts[incomingInst]] = replaceVal;
           else
-            InstsToReplaceByPhi[phiVal] = phi;
+            InstsToReplaceByPhi[phiVal] = replaceVal;
         }
       }
     }
@@ -2923,6 +2942,7 @@ std::string demangleVariableName(StringRef var){
   return newVar;
 }
 std::string CWriter::GetValueName(Value *Operand) {
+  errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
     return GetValueName(InstsToReplaceByPhi[Operand]);
@@ -4736,7 +4756,7 @@ void CWriter::generateHeader(Module &M) {
     ArrayType *ATy = dyn_cast<ArrayType>(*it);
     VectorType *VTy = dyn_cast<VectorType>(*it);
     //errs() << "SUSAN: STy: " << *STy << "\n";
-    errs() << "SUSAN: ATy: " << *ATy << "\n";
+    //errs() << "SUSAN: ATy: " << *ATy << "\n";
     //errs() << "SUSAN: VTy: " << *VTy << "\n";
     unsigned e = (STy ? STy->getNumElements()
                       : (ATy ? ATy->getNumElements() : NumberOfElements(VTy)));
@@ -6609,16 +6629,19 @@ void CWriter::printLoopNew(Loop *L) {
     //else icmp = dyn_cast<ICmpInst>(condInst);
 
     // print live-in declarations
-    for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
-      Instruction *inst = cast<Instruction>(I);
-      if(declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
-         Out << "  ";
-         printTypeName(Out, inst->getType(), false)
-                        << ' ' << GetValueName(inst);
-         Out << ";\n";
-         declaredInsts.insert(inst);
-      }
-    }
+   // errs() << "header: " << *header << "\n";
+   // errs() << "condInst: " << *condInst << "\n";
+   // for (BasicBlock::iterator I = header->begin(); cast<Instruction>(I) != condInst; ++I) {
+   //   Instruction *inst = cast<Instruction>(I);
+   //   errs() << "SUSAN: inst" << *inst << "\n";
+   //   if(inst && declaredInsts.find(inst) == declaredInsts.end() && !isEmptyType(inst->getType())){
+   //      Out << "  ";
+   //      printTypeName(Out, inst->getType(), false)
+   //                     << ' ' << GetValueName(inst);
+   //      Out << ";\n";
+   //      declaredInsts.insert(inst);
+   //   }
+   // }
 
     // print prologue
     if(L->getBlocks().size() > 1){
