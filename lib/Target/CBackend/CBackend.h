@@ -394,6 +394,7 @@ private:
   void preprocessSkippableBranches(Function &F);
   Value* findOriginalValue(Value *val);
   CBERegion* findRegionOfBlock(BasicBlock* BB);
+  bool dominatedByReturn(BasicBlock* brBB);
 
 
 

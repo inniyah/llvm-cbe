@@ -392,7 +392,8 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
                     directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
     bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
-    if(!trueBrOnly && !falseBrOnly){
+    bool returnDominated = dominatedByReturn(brBB);
+    if(!trueBrOnly && !falseBrOnly && !returnDominated){
       trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
       falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
     }
@@ -423,7 +424,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
         return;
     }
 
-    if(trueBrOnly){
+    if(trueBrOnly && !returnDominated){
         recordTimes2bePrintedForBranch(trueStartBB, brBB, falseStartBB,
           currRegion);
 
@@ -441,7 +442,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
       recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB, currRegion, true);
     }
     //Case 3: only print if body with reveresed case
-    else if(falseBrOnly){
+    else if(falseBrOnly && !returnDominated){
       recordTimes2bePrintedForBranch(falseStartBB, brBB, trueStartBB,
             currRegion);
 
@@ -482,6 +483,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
         currRegion->elseBBs.push_back(ret);
       }
    }
+
   errs() << "=================SUSAN: END OF marking region : " << br->getParent()->getName() << "==================\n";
 }
 
@@ -7332,6 +7334,42 @@ void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
 }
 
 
+bool CWriter::dominatedByReturn(BasicBlock* brBB){
+  Function *F = brBB->getParent();
+  BasicBlock *returnBB = nullptr;
+  for(auto &BB : *F)
+    if(isa<ReturnInst>(BB.getTerminator())){
+      returnBB = &BB;
+      break;
+    }
+
+  if(!returnBB) return false;
+
+
+  std::set<BasicBlock*> visited;
+  std::queue<BasicBlock*> toVisit;
+  visited.insert(brBB);
+  toVisit.push(brBB);
+
+  while(!toVisit.empty()){
+    BasicBlock* currBB = toVisit.front();
+    toVisit.pop();
+
+    if(currBB != brBB && currBB != returnBB && PDT->dominates(currBB, brBB))
+      return false;
+
+    for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
+      BasicBlock *succBB = *succ;
+      if(visited.find(succBB) == visited.end()){
+        visited.insert(succBB);
+        toVisit.push(succBB);
+      }
+    }
+  }
+
+  return true;
+}
+
 void CWriter::naturalBranchTranslation(BranchInst &I){
   errs() << "SUSAN: emitting branch: " << I << "\n";
   CurInstr = &I;
@@ -7417,17 +7455,20 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   //                   && !( isPotentiallyReachable(falseStartBB, brBB) &&
   //                     isPotentiallyReachable(brBB, trueStartBB) );
 
-  bool trueBrOnly = PDT->dominates(falseStartBB, trueStartBB) &&
-                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
+
+  bool trueBrOnly = (PDT->dominates(falseStartBB, trueStartBB) &&
+                    directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB));
   bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
+  bool returnDominated = dominatedByReturn(brBB);
 
-  if(!trueBrOnly && !falseBrOnly){
+  if(!trueBrOnly && !falseBrOnly && !returnDominated){
     trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
     falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
   }
 
-  if(falseBrOnly){
+  if(falseBrOnly && !returnDominated){
+    errs() << "SUSAN: false branch only!!\n" << I << "\n";
     Out << "  if (!";
     writeOperand(I.getCondition(), ContextCasted);
     Out << ") {\n";
@@ -7482,7 +7523,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 
 
     //Case 2: only print if body
-    if(trueBrOnly){
+    if(trueBrOnly || returnDominated){
       //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
       //printPHIsIfNecessary()
       emitIfBlock(cbeRegion);
@@ -7502,6 +7543,9 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
     }
 
     Out << "}\n";
+
+    if(returnDominated)
+      emitIfBlock(cbeRegion, true);
 
   Out << "\n";
 }
