@@ -606,19 +606,16 @@ void CWriter::findVariableDepth(Type *Ty, Value *UO, int depths){
   else
     Times2Dereference[UO]++;
 
+  if(isa<IntegerType>(Ty) || Ty->isFloatTy() || Ty->isDoubleTy())
+      return;
+
   if(PointerType *ptrTy = dyn_cast<PointerType>(Ty)){
     Type *nextTy = ptrTy->getPointerElementType();
-    if(isa<IntegerType>(nextTy) || nextTy->isFloatTy() || nextTy->isDoubleTy()){
-      Times2Dereference[UO]++;
-      return;
-    }
-    if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
-      findVariableDepth(nextTy, UO, depths);
+    findVariableDepth(nextTy, UO, depths);
   }
   else if(ArrayType *arrTy = dyn_cast<ArrayType>(Ty)){
     Type *nextTy = arrTy->getArrayElementType();
-    if(isa<PointerType>(nextTy) || isa<ArrayType>(nextTy) || isa<StructType>(nextTy))
-      findVariableDepth(nextTy, UO, depths);
+    findVariableDepth(nextTy, UO, depths);
   }
   else if(StructType *strucTy = dyn_cast<StructType>(Ty)){
     for (StructType::element_iterator I = strucTy->element_begin(),
@@ -659,6 +656,8 @@ void CWriter::collectVariables2Deref(Function &F){
            Constant *globVal = glob->getInitializer();
            Type *globTy = globVal->getType();
            if(isa<ArrayType>(globTy) || isa<StructType>(globTy) || isa<PointerType>(globTy)){
+             errs() << "global: " << *glob << "\n";
+             errs() << "type: " << *globTy << "\n";
              findVariableDepth(globTy, cast<Value>(glob), 0);
            }
          }
