@@ -62,7 +62,7 @@ typedef struct CBERegion{
   std::vector<std::pair<BasicBlock*, BasicBlock*>> elseEdges;
 } CBERegion;
 
-typedef struct ForLoopProfile{
+typedef struct LoopProfile{
   Loop *L;
   Value *ub;
   int ubOffset;
@@ -72,7 +72,7 @@ typedef struct ForLoopProfile{
   bool isOmpLoop;
   bool barrier;
   Value* lbAlloca;
-} ForLoopProfile;
+} LoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
 public:
@@ -119,7 +119,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
-  std::set<ForLoopProfile*> LoopProfiles;
+  std::set<LoopProfile*> LoopProfiles;
   std::set<GetElementPtrInst*> GEPNeedsReference;
   //std::set<Value*>skipInstsForPhis;
   std::map<PHINode*, std::set<Value*>>phis2print;
@@ -376,8 +376,8 @@ private:
   Loop* findLoopAccordingTo(Function &F, Value *bound);
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition);
-  ForLoopProfile* findForLoopProfile(Loop *L);
-  void printLoopBody(ForLoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
+  LoopProfile* findForLoopProfile(Loop *L);
+  void printLoopBody(LoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
@@ -386,7 +386,7 @@ private:
   void searchForBlocksToSkip(Loop *L, std::set<BasicBlock*> &skipBlocks);
   void findCondRelatedInsts(BasicBlock *skipBlock, std::set<Value*> &condRelatedInsts);
   void DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared, std::set<std::string> &declaredLocals);
-  void OMP_RecordLiveIns(ForLoopProfile *LP);
+  void OMP_RecordLiveIns(LoopProfile *LP);
   void keepIVUnrelatedInsts(BasicBlock *skipBB, Instruction *condInst, std::set<Instruction*> &InstsKeptFromSkipBlock);
   bool canSkipHeader(BasicBlock* header);
   void preprocessSkippableInsts(Function &F);

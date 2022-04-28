@@ -851,7 +851,7 @@ PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
 }
 
 void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
-  ForLoopProfile *ompLI = new ForLoopProfile();
+  LoopProfile *ompLI = new LoopProfile();
   ompLI->L = L;
   ompLI->ub = ub;
   ompLI->lb = lb;
@@ -978,7 +978,7 @@ void CWriter::omp_preprossesing(Function &F){
   lb = nullptr;
   ub = nullptr;
   incr = nullptr;
-  ForLoopProfile *currLP = nullptr;
+  LoopProfile *currLP = nullptr;
   int countBarrier = 0;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
@@ -988,7 +988,7 @@ void CWriter::omp_preprossesing(Function &F){
          * OpenMP: translate omp parallel for schedule (static)
          */
         if(ompCall->getName().contains("__kmpc_for_static_init")){
-          ForLoopProfile *ompLP = new ForLoopProfile();
+          LoopProfile *ompLP = new LoopProfile();
           initCI = CI;
           omp_SkipVals.insert(cast<Value>(CI));
 
@@ -1120,7 +1120,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
       continue;
     }
 
-    ForLoopProfile* LP = new ForLoopProfile();
+    LoopProfile* LP = new LoopProfile();
     LP->L = L;
     LP->IV = IV;
 
@@ -3071,7 +3071,7 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
 
 
   bool isOmpLoop = false;
-  ForLoopProfile *LP = nullptr;
+  LoopProfile *LP = nullptr;
   for(auto lp : LoopProfiles)
     if(CurLoop && lp->L == CurLoop && lp->isOmpLoop){
       isOmpLoop = true;
@@ -6165,7 +6165,7 @@ Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
   return nullptr;
 }
 
-ForLoopProfile* CWriter::findForLoopProfile(Loop *L){
+LoopProfile* CWriter::findForLoopProfile(Loop *L){
   for(auto LP : LoopProfiles)
     if(LP->L == L){
       errs() << "SUSAN: found LP for L:" << *L << "\n";
@@ -6231,7 +6231,7 @@ bool CWriter::canSkipHeader(BasicBlock* header){
   return true;
 }
 
-void CWriter::printLoopBody(ForLoopProfile *LP, Instruction* condInst,  std::set<Value*> &skipInsts){
+void CWriter::printLoopBody(LoopProfile *LP, Instruction* condInst,  std::set<Value*> &skipInsts){
   Loop *L = LP->L;
   // print loop body
 
@@ -6451,7 +6451,7 @@ bool CWriter::isSkipableInst(Instruction* inst){
     return false;
 }
 
-void CWriter::OMP_RecordLiveIns(ForLoopProfile *LP){
+void CWriter::OMP_RecordLiveIns(LoopProfile *LP){
    Loop *L = LP->L;
    std::set<BasicBlock*> skipBlocks;
    searchForBlocksToSkip(L, skipBlocks);
@@ -6486,7 +6486,7 @@ void CWriter::printLoopNew(Loop *L) {
   Instruction *condInst = findCondInst(L, negateCondition);
 
   //translate as a for loop
-  ForLoopProfile *LP = findForLoopProfile(L);
+  LoopProfile *LP = findForLoopProfile(L);
   if(LP){
 
     if(LP->isOmpLoop){
