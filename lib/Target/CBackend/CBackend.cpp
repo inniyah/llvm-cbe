@@ -1172,82 +1172,59 @@ void CWriter::preprocessSkippableBranches(Function &F){
     ICmpInst *cmp = dyn_cast<ICmpInst>(br->getCondition());
     if(!cmp) continue;
 
-    if(cmp->getPredicate() != CmpInst::ICMP_SGT
-      && cmp->getPredicate() != CmpInst::ICMP_UGT
-      && cmp->getPredicate() != CmpInst::ICMP_EQ) continue;
-
-    Value* comparedVal = cmp->getOperand(0);
+    Value* opnd0 = cmp->getOperand(0);
     Value* opnd1 = cmp->getOperand(1);
-    comparedVal = findOriginalValue(comparedVal);
-    errs() << "SUSAN: compared val:" << *comparedVal << "\n";
+    errs() << "SUSAN: opnd0" << *opnd0 << "\n";
+    errs() << "SUSAN: opnd1" << *opnd1 << "\n";
+    if(isInductionVariable(opnd0) || isInductionVariable(opnd1))
+      continue;
 
+    opnd0 = findOriginalValue(opnd0);
+    opnd1 = findOriginalValue(opnd1);
 
     // check if it's a call to omp master
     bool isMasterCall = false;
-    if(CallInst* CI = dyn_cast<CallInst>(comparedVal))
+    if(CallInst* CI = dyn_cast<CallInst>(opnd0))
       if(Function *ompCall = CI->getCalledFunction())
         if(ompCall->getName().contains("__kmpc_master"))
           if(cmp->getPredicate() == CmpInst::ICMP_EQ)
             isMasterCall = true;
-
-
-    for(auto LP : LoopProfiles){
-
-      bool isDoWhileReverse = false;
-      if(LP->ub == comparedVal
-          && (cmp->getPredicate() == CmpInst::ICMP_SGT
-              || cmp->getPredicate() == CmpInst::ICMP_UGT))
-                isDoWhileReverse = true;
-      else if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub)){
-        Value *ldPtr = ldUB->getPointerOperand();
-        if(ldPtr == comparedVal
-          && (cmp->getPredicate() == CmpInst::ICMP_SGT
-              || cmp->getPredicate() == CmpInst::ICMP_UGT))
-                isDoWhileReverse = true;
-      }
-
-      bool isCheckingLB = false;
-      if(LP->lbAlloca == comparedVal
-          && (cmp->getPredicate() == CmpInst::ICMP_SGT
-              || cmp->getPredicate() == CmpInst::ICMP_UGT))
-        isCheckingLB = true;
-
-      if(!isDoWhileReverse && !isMasterCall && !isCheckingLB) continue;
-
-
-      errs() << "SUSAN: loop is: " << *LP->L << "\n";
-      errs() << "branch: " << *br << "\n";
-      errs() << "ub: " << *LP->ub << "\n";
-      errs() << "lb: " << *LP->lb << "\n";
-
-      if(isDoWhileReverse){
-        //CBERegion *R = findRegionOfBlock(br->getParent());
-
-        //if(nodeBelongsToRegion(LP->L->getHeader(), R, false)){
-        if(cmp->getPredicate() == CmpInst::ICMP_SGT
-            || cmp->getPredicate() == CmpInst::ICMP_UGT){
-          errs() << "added br to dead branches 0" << *br << "\n";
-          deadBranches[br] = 0;
-        }
-        else if(cmp->getPredicate() == CmpInst::ICMP_SLE
-            || cmp->getPredicate() == CmpInst::ICMP_ULE){
-        //else if(nodeBelongsToRegion(LP->L->getHeader(), R, true)){
-          errs() << "added br to dead branches 1" << *br << "\n";
-          deadBranches[br] = 1;
-        }
-      } else if(isMasterCall){
-        deadBranches[br] = 1;
-      } else if(isCheckingLB){
-        Value *opnd1 = cmp->getOperand(1);
-        if(SelectInst *sel = dyn_cast<SelectInst>(opnd1)){
-          //LoadInst *ld = dyn_cast<LoadInst>(sel->getTrueValue());
-          //if(ld && ld->getPointerOperand() == LP->ub)
-            deadBranches[br] = 1;
-        }
-      }
-
+    if(isMasterCall){
+      deadBranches[br] = 1;
+      continue;
     }
 
+    for(auto LP : LoopProfiles){
+      Value *UpperBound = LP->ub;
+      errs() << "SUSAN: LP->ub: "  << *LP->ub << "\n";
+      if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub))
+        UpperBound = ldUB->getPointerOperand();
+      errs() << "SUSAN: upperbound: "  << *LP->ub << "\n";
+
+      if(UpperBound == opnd0){
+         if ((cmp->getPredicate() == CmpInst::ICMP_SGT
+              || cmp->getPredicate() == CmpInst::ICMP_UGT))
+          deadBranches[br] = 0;
+      }
+      else if(UpperBound == opnd1){
+        bool negateCondition = false;
+        Instruction *condInst = findCondInst(LP->L, negateCondition);
+        if(cmp == condInst) continue;
+
+        if (cmp->getPredicate() == CmpInst::ICMP_SLT
+            || cmp->getPredicate() == CmpInst::ICMP_ULT)
+        deadBranches[br] = 0;
+      }
+      else if(LP->lbAlloca == opnd0
+          && (cmp->getPredicate() == CmpInst::ICMP_SGT
+              || cmp->getPredicate() == CmpInst::ICMP_UGT)){
+         Value *opnd1 = cmp->getOperand(1);
+         if(isa<SelectInst>(opnd1)){
+           errs() << "SUSAN: cmp added to deadbranch 1:" << *cmp << "\n";
+           deadBranches[br] = 1;
+         }
+      }
+    }
   }
 }
 
