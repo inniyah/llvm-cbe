@@ -464,8 +464,8 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
             currRegion);
 
       BasicBlock *ret = isExitingFunction(trueStartBB);
-      if(ret && !nodeBelongsToRegion(ret, currRegion) && ret != trueStartBB){
-        if(ret == trueStartBB)
+      if(ret && !nodeBelongsToRegion(ret, currRegion)){// && ret != trueStartBB){
+        if(ret == falseStartBB)
           currRegion->thenEdges.push_back(std::make_pair(brBB, ret));
         else
           currRegion->thenEdges.push_back(std::make_pair(trueStartBB, ret));
@@ -475,7 +475,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
             currRegion, true);
 
       ret = isExitingFunction(falseStartBB);
-      if(ret && !nodeBelongsToRegion(ret, currRegion, true) && ret != falseStartBB){
+      if(ret && !nodeBelongsToRegion(ret, currRegion, true)){// && ret != falseStartBB){
         if(ret == trueStartBB)
           currRegion->elseEdges.push_back(std::make_pair(brBB, ret));
         else
@@ -7500,8 +7500,6 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
 
     //Case 2: only print if body
     if(trueBrOnly || returnDominated){
-      //printPHICopiesForSuccessor(brBB, I.getSuccessor(0), 2);
-      //printPHIsIfNecessary()
       emitIfBlock(cbeRegion);
     }
     //Case 3: only print if body with reveresed case
