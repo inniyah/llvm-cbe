@@ -6642,6 +6642,19 @@ void CWriter::printLoopNew(Loop *L) {
   }
 
 
+  std::set<Value*> condRelatedInsts;
+  BasicBlock *condBlock = condInst->getParent();
+  findCondRelatedInsts(condBlock, condRelatedInsts);
+  for(auto condRelatedInst : condRelatedInsts){
+    Instruction *inst = cast<Instruction>(condRelatedInst);
+    errs() << "SUSAN: while condrelatedinst:" << *inst << "\n";
+    if(isIVIncrement(inst) ||isa<PHINode>(inst)
+        || isa<BranchInst>(inst) || isa<CmpInst>(inst)
+        || isInlinableInst(*inst) || inst == LP->incr)
+      continue;
+    errs() << "SUSAN: printing while condRelatedInst: " << *inst << "\n";
+    printInstruction(inst);
+  }
   // print compare statement
   if(condInst){
   //  assert(brInst && brInst->isConditional() &&
@@ -6682,19 +6695,7 @@ void CWriter::printLoopNew(Loop *L) {
     printBasicBlock(header);
   }
 
-  std::set<Value*> condRelatedInsts;
-  BasicBlock *condBlock = condInst->getParent();
-  findCondRelatedInsts(condBlock, condRelatedInsts);
-  for(auto condRelatedInst : condRelatedInsts){
-    Instruction *inst = cast<Instruction>(condRelatedInst);
-    errs() << "SUSAN: condrelatedinst:" << *inst << "\n";
-    if(isIVIncrement(inst) ||isa<PHINode>(inst)
-        || isa<BranchInst>(inst) || isa<CmpInst>(inst)
-        || isInlinableInst(*inst) || inst == LP->incr)
-      continue;
-    errs() << "SUSAN: printing condRelatedInst: " << *inst << "\n";
-    printInstruction(inst);
-  }
+
   printLoopBody(LP, condInst, condRelatedInsts);
 
   Out << "}\n";
