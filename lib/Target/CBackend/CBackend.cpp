@@ -858,6 +858,7 @@ void CWriter::CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr){
   ompLI->incr = incr;
   ompLI->IV = getInductionVariable(L, SE);
   ompLI->isOmpLoop = true;
+  ompLI->isForLoop = true;
   assert(ompLI->IV && "SUSAN: only translate for loop for omp right now\n");
   LoopProfiles.insert(ompLI);
 }
@@ -1043,6 +1044,7 @@ void CWriter::omp_preprossesing(Function &F){
           currLP->barrier = false;
           countBarrier = 0;
           currLP->IV = getInductionVariable(ompLoop, SE);
+          currLP->isForLoop = true;
           LoopProfiles.insert(currLP);
         }
 
@@ -1112,15 +1114,28 @@ void CWriter::preprocessLoopProfiles(Function &F){
       continue;
     }
 
-    errs() << "SUSAN: recording loop as non omp: " << *L << "\n";
     PHINode *IV = getInductionVariable(L, SE);
     if(!IV){
+      errs() << "SUSAN: recording while loop profile:" << *L << "\n";
+      LoopProfile* LP = new LoopProfile();
+      LP->isForLoop = false;
+      LP->L = L;
+      LP->IV = nullptr;
+      LP->ub = nullptr;
+      LP->lb = nullptr;
+      bool negateCondition = false;
+      Instruction *condInst = findCondInst(LP->L, negateCondition);
+      if(condInst)
+        errs() << "while loop condInst" << *condInst << "\n";
+      LoopProfiles.insert(LP);
+
       loops.insert(loops.end(), L->getSubLoops().begin(),
         L->getSubLoops().end());
       continue;
     }
 
     LoopProfile* LP = new LoopProfile();
+    LP->isForLoop = true;
     LP->L = L;
     LP->IV = IV;
 
@@ -1153,6 +1168,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
 
   errs() << "=========LOOP PROFILES=========\n";
   for(auto LP : LoopProfiles){
+    if(!LP->isForLoop) continue;
     errs() << "Loop: " << *LP->L << "\n";
     errs() << "isomp: " << LP->isOmpLoop << "\n";
     errs() << "ub: " << *LP->ub << "\n";
@@ -1194,34 +1210,61 @@ void CWriter::preprocessSkippableBranches(Function &F){
     }
 
     for(auto LP : LoopProfiles){
-      Value *UpperBound = LP->ub;
-      errs() << "SUSAN: LP->ub: "  << *LP->ub << "\n";
-      if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub))
-        UpperBound = ldUB->getPointerOperand();
-      errs() << "SUSAN: upperbound: "  << *LP->ub << "\n";
+      if(LP->isForLoop){
+        Value *UpperBound = LP->ub;
+        errs() << "SUSAN: LP->ub: "  << *LP->ub << "\n";
+        if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub))
+          UpperBound = ldUB->getPointerOperand();
+        errs() << "SUSAN: upperbound: "  << *LP->ub << "\n";
 
-      if(UpperBound == opnd0){
-         if ((cmp->getPredicate() == CmpInst::ICMP_SGT
-              || cmp->getPredicate() == CmpInst::ICMP_UGT))
+        if(UpperBound == opnd0){
+           if ((cmp->getPredicate() == CmpInst::ICMP_SGT
+                || cmp->getPredicate() == CmpInst::ICMP_UGT))
+            deadBranches[br] = 0;
+        }
+        else if(UpperBound == opnd1){
+          bool negateCondition = false;
+          Instruction *condInst = findCondInst(LP->L, negateCondition);
+          if(cmp == condInst) continue;
+
+          if (cmp->getPredicate() == CmpInst::ICMP_SLT
+              || cmp->getPredicate() == CmpInst::ICMP_ULT)
           deadBranches[br] = 0;
+        }
+        else if(LP->lbAlloca == opnd0
+            && (cmp->getPredicate() == CmpInst::ICMP_SGT
+                || cmp->getPredicate() == CmpInst::ICMP_UGT)){
+           Value *opnd1 = cmp->getOperand(1);
+           if(isa<SelectInst>(opnd1))
+             deadBranches[br] = 1;
+        }
       }
-      else if(UpperBound == opnd1){
-        bool negateCondition = false;
-        Instruction *condInst = findCondInst(LP->L, negateCondition);
-        if(cmp == condInst) continue;
+      else{
+        bool negateCondition;
+        Instruction* condInst = findCondInst(LP->L, negateCondition);
+        Value *loopCondOpnd0 = condInst->getOperand(0);
+        Value *loopCondOpnd1 = condInst->getOperand(1);
+        if(loopCondOpnd1 != opnd1 && loopCondOpnd0 != opnd0 ) continue;
 
-        if (cmp->getPredicate() == CmpInst::ICMP_SLT
-            || cmp->getPredicate() == CmpInst::ICMP_ULT)
-        deadBranches[br] = 0;
-      }
-      else if(LP->lbAlloca == opnd0
-          && (cmp->getPredicate() == CmpInst::ICMP_SGT
-              || cmp->getPredicate() == CmpInst::ICMP_UGT)){
-         Value *opnd1 = cmp->getOperand(1);
-         if(isa<SelectInst>(opnd1)){
-           errs() << "SUSAN: cmp added to deadbranch 1:" << *cmp << "\n";
-           deadBranches[br] = 1;
-         }
+        bool isDoWhileReversed = false;
+        if(loopCondOpnd1 == opnd1){
+          for(User *user : opnd0->users()){
+            PHINode *userPhi = dyn_cast<PHINode>(user);
+            if(!userPhi) continue;
+            for(unsigned i=0; i<userPhi->getNumIncomingValues(); ++i)
+              if(userPhi->getIncomingValue(i) == loopCondOpnd0)
+                isDoWhileReversed = true;
+          }
+        }
+
+        if(!isDoWhileReversed) continue;
+
+        if(!negateCondition){
+          errs() << "SUSAN: found deadbranch for while loop: " << *br << "\n";
+          deadBranches[br] = 0;
+        }
+        else
+          deadBranches[br] = 1;
       }
     }
   }
@@ -1257,7 +1300,7 @@ void CWriter::EliminateDeadInsts(Function &F){
   //any instructions that's not in an omp loop or not an livein should be eliminated
   if(IS_OPENMP_FUNCTION){
     for(auto LP : LoopProfiles)
-      //if(LP->isOmpLoop)
+      if(LP->isForLoop)
         OMP_RecordLiveIns(LP);
 
 
@@ -5927,6 +5970,7 @@ void CWriter::printFunction(Function &F) {
     //    OMP_RecordLiveIns(LP);
     //find all the local variables to declare
     for(auto LP : LoopProfiles){
+      if(!LP->isForLoop) continue;
       std::set<std::string> declaredLocals;
       //if(!LP->isOmpLoop) continue;
       if(!LP->isOmpLoop){
@@ -6167,7 +6211,7 @@ Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
 
 LoopProfile* CWriter::findForLoopProfile(Loop *L){
   for(auto LP : LoopProfiles)
-    if(LP->L == L){
+    if(LP->L == L && LP->isForLoop){
       errs() << "SUSAN: found LP for L:" << *L << "\n";
       if(LP->isOmpLoop) errs() << "isomp\n";
       return LP;

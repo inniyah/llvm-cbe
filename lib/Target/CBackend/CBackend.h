@@ -72,6 +72,7 @@ typedef struct LoopProfile{
   bool isOmpLoop;
   bool barrier;
   Value* lbAlloca;
+  bool isForLoop;
 } LoopProfile;
 
 class CBEMCAsmInfo : public MCAsmInfo {
