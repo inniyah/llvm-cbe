@@ -6665,26 +6665,6 @@ void CWriter::printLoopNew(Loop *L) {
    //   }
    // }
 
-    // print prologue
-    if(L->getBlocks().size() > 1){
-      for (BasicBlock::iterator I = header->begin();
-         cast<Instruction>(I) !=  condInst && I != header->end();
-         ++I)
-        if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
-          printInstruction(cast<Instruction>(I));
-
-      if(isa<CallInst>(condInst)){
-        printInstruction(condInst);
-      }
-    }
-    else{
-      BasicBlock *loopBB = L->getBlocks()[0];
-      for (BasicBlock::iterator I = loopBB->begin(); isa<PHINode>(I); ++I){
-        errs() << "SUSAN: printing instruction: " << *I << " at 6535\n";
-        printInstruction(&*I);
-      }
-    }
-
     if(!negateCondition) Out << "while (";
     else Out << "while(!(";
 
