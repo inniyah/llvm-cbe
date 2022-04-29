@@ -1123,6 +1123,8 @@ void CWriter::preprocessLoopProfiles(Function &F){
       LP->IV = nullptr;
       LP->ub = nullptr;
       LP->lb = nullptr;
+      LP->incr = nullptr;
+      LP->lbAlloca = nullptr;
       bool negateCondition = false;
       Instruction *condInst = findCondInst(LP->L, negateCondition);
       if(condInst)
@@ -6209,9 +6211,9 @@ Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
   return nullptr;
 }
 
-LoopProfile* CWriter::findForLoopProfile(Loop *L){
+LoopProfile* CWriter::findLoopProfile(Loop *L){
   for(auto LP : LoopProfiles)
-    if(LP->L == L && LP->isForLoop){
+    if(LP->L == L){
       errs() << "SUSAN: found LP for L:" << *L << "\n";
       if(LP->isOmpLoop) errs() << "isomp\n";
       return LP;
@@ -6530,8 +6532,8 @@ void CWriter::printLoopNew(Loop *L) {
   Instruction *condInst = findCondInst(L, negateCondition);
 
   //translate as a for loop
-  LoopProfile *LP = findForLoopProfile(L);
-  if(LP){
+  LoopProfile *LP = findLoopProfile(L);
+  if(LP->isForLoop){
 
     if(LP->isOmpLoop){
       for(auto I : omp_liveins[L])
@@ -6680,37 +6682,20 @@ void CWriter::printLoopNew(Loop *L) {
     printBasicBlock(header);
   }
 
-  // print loop body
-  for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
-    BasicBlock *BB = L->getBlocks()[i];
-    Loop *BBLoop = LI->getLoopFor(BB);
-
-
-
-    // Don't print Loop header any more
-    if(BB != L->getHeader()){
-      if (BBLoop == L){
-        printBasicBlock(BB);
-        times2bePrinted[BB]--;
-      }
-      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
-        errs() << "SUSAN: printing loop " << BB->getName() << " at 6100\n";
-        if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
-        else printLoop(BBLoop);
-      }
-    }
-
-
+  std::set<Value*> condRelatedInsts;
+  BasicBlock *condBlock = condInst->getParent();
+  findCondRelatedInsts(condBlock, condRelatedInsts);
+  for(auto condRelatedInst : condRelatedInsts){
+    Instruction *inst = cast<Instruction>(condRelatedInst);
+    errs() << "SUSAN: condrelatedinst:" << *inst << "\n";
+    if(isIVIncrement(inst) ||isa<PHINode>(inst)
+        || isa<BranchInst>(inst) || isa<CmpInst>(inst)
+        || isInlinableInst(*inst) || inst == LP->incr)
+      continue;
+    errs() << "SUSAN: printing condRelatedInst: " << *inst << "\n";
+    printInstruction(inst);
   }
-
-  if(condInst){
-    for (BasicBlock::iterator I = L->getHeader()->begin();
-        cast<Instruction>(I) !=  condInst && I != L->getHeader()->end();
-        ++I){
-      if (!isa<GetElementPtrInst>(cast<Instruction>(I)))
-        printInstruction(cast<Instruction>(I));
-    }
-  }
+  printLoopBody(LP, condInst, condRelatedInsts);
 
   Out << "}\n";
   CurLoop = nullptr;

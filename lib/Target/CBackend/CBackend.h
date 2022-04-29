@@ -377,7 +377,7 @@ private:
   Loop* findLoopAccordingTo(Function &F, Value *bound);
   void CreateOmpLoops(Loop *L, Value* ub, Value *lb, Value *incr);
   Instruction* findCondInst(Loop *L, bool &negateCondition);
-  LoopProfile* findForLoopProfile(Loop *L);
+  LoopProfile* findLoopProfile(Loop *L);
   void printLoopBody(LoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
