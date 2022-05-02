@@ -132,6 +132,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool omp_declarePrivate;
   bool isSkipableInst(Instruction* inst);
   void EliminateDeadInsts(Function &F);
+  bool returnDominated;
   std::set<Instruction*> deadInsts;
 
   CBERegion topRegion;

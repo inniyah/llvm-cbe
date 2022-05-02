@@ -339,10 +339,22 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
 
     //}
 
-    for(auto bb : currRegion->thenBBs)
+    for(auto bb : currRegion->thenBBs){
+      if(returnDominated && currRegion == &topRegion
+          && isa<ReturnInst>(bb->getTerminator())){
+        errs() << "SUSAN: found duplicated then return BB\n";
+        continue;
+      }
       times2bePrinted[bb]++;
-    for(auto bb : currRegion->elseBBs)
+    }
+    for(auto bb : currRegion->elseBBs){
+      if(returnDominated && currRegion == &topRegion
+          && isa<ReturnInst>(bb->getTerminator())){
+        errs() << "SUSAN: found duplicated else return BB\n";
+        continue;
+      }
       times2bePrinted[bb]++;
+    }
 
     for(auto subRegion : currRegion->thenSubRegions)
       toVisit.push(subRegion);
@@ -392,7 +404,7 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
                     directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB);
     bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
-    bool returnDominated = dominatedByReturn(brBB);
+    returnDominated = dominatedByReturn(brBB);
     if(!trueBrOnly && !falseBrOnly && !returnDominated){
       trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
       falseBrOnly = (exitFunctionFalseBr && !exitFunctionTrueBr) || exitLoopFalseBB;
@@ -497,6 +509,7 @@ void CWriter::markBBwithNumOfVisits(Function &F){
     times2bePrinted[&BB]=0;
   }
 
+  returnDominated = false;
   recordTimes2bePrintedForBranch(&F.getEntryBlock(), nullptr, nullptr, &topRegion);
 
   //despite root node, each leaf-to-child_of_root path will contain a set of BBs, these BBs times3bePrinted need to be incrememnted, lastly any node with times2bePrinted = 0 means it belong to the entry node and therefore times2bePrinted = 1
@@ -7446,7 +7459,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
                     directPathFromAtoBwithoutC(trueStartBB, falseStartBB, brBB));
   bool falseBrOnly  = PDT->dominates(trueStartBB, falseStartBB) &&
                       directPathFromAtoBwithoutC(falseStartBB, trueStartBB, brBB);
-  bool returnDominated = dominatedByReturn(brBB);
+  returnDominated = dominatedByReturn(brBB);
 
   if(!trueBrOnly && !falseBrOnly && !returnDominated){
     trueBrOnly = (exitFunctionTrueBr && !exitFunctionFalseBr) || exitLoopTrueBB;
