@@ -2865,7 +2865,7 @@ void CWriter::printConstant(Constant *CPV, enum OperandContext Context) {
     if (isa<ConstantPointerNull>(CPV)) {
       Out << "((";
       printTypeName(Out, CPV->getType()); // sign doesn't matter
-      Out << ")/*NULL*/0)";
+      Out << ")0)";
       break;
     } else if (GlobalValue *GV = dyn_cast<GlobalValue>(CPV)) {
       writeOperand(GV);
@@ -3033,7 +3033,7 @@ std::string CWriter::GetValueName(Value *Operand) {
       VarName += ch;
   }
 
-  return "llvm_cbe_" + VarName;
+  return "_" + VarName;
 }
 
 /// writeInstComputationInline - Emit the computation for the specified
@@ -7313,7 +7313,8 @@ void CWriter::emitIfBlock(CBERegion *R, bool isElseBranch){
     for(auto bb : bbs){
       errs() << "printing BB in emitIfBlock" << bb->getName() << "\n";
       if (Loop *L = LI->getLoopFor(bb)) {
-        if (L->getHeader() == bb && L->getParentLoop() == nullptr && times2bePrinted[bb]){
+        if (L->getHeader() == bb //&& L->getParentLoop() == nullptr
+            && times2bePrinted[bb]){
           errs() << "SUSAN: printing loop " << bb->getName() << " at 6677\n";
           if(NATURAL_CONTROL_FLOW)
             printLoopNew(L);
@@ -8569,8 +8570,8 @@ void CWriter::visitCallInst(CallInst &I) {
     Out << " = ";
   }
 
-  if (I.isTailCall())
-    Out << " /*tail*/ ";
+  //if (I.isTailCall())
+  //  Out << " /*tail*/ ";
 
   // If this is an indirect call to a struct return function, we need to cast
   // the pointer. Ditto for indirect calls with byval arguments.
