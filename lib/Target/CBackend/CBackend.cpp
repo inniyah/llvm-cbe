@@ -6344,7 +6344,7 @@ void CWriter::printLoopBody(LoopProfile *LP, Instruction* condInst,  std::set<Va
         printBasicBlock(BB, skipInsts);
         times2bePrinted[BB]--;
       }
-      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L){
+      else if (BB == BBLoop->getHeader() && BBLoop->getParentLoop() == L && times2bePrinted[BB]){
         errs() << "SUSAN: printing loop " << BB->getName() << " at 5753\n";
         if(NATURAL_CONTROL_FLOW) printLoopNew(BBLoop);
         else printLoop(BBLoop);
