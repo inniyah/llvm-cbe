@@ -919,7 +919,8 @@ void CWriter::preprossesPHIs2Print(Function &F){
       LoadInst *ldInst = nullptr;
       StoreInst *stInst = nullptr;
 
-      if(isInductionVariable(cast<Value>(phi))) continue;
+      if(isInductionVariable(phi)) continue;
+      //if(isExtraInductionVariable(phi)) continue;
       for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
         BasicBlock *predBB = phi->getIncomingBlock(i);
         Value *phiVal = phi->getIncomingValue(i);
@@ -1444,6 +1445,49 @@ void CWriter::EliminateDeadInsts(Function &F){
   }
 }
 
+void CWriter::FindInductionVariableRelationships(){
+  std::list<Loop*> loops( LI->begin(), LI->end() );
+  while( !loops.empty() )
+  {
+    Loop *L = loops.front();
+    loops.pop_front();
+
+    BasicBlock *header = L->getHeader();
+    PHINode *headIV = nullptr;
+    for(auto &I : *header){
+      PHINode *phi = dyn_cast<PHINode>(&I);
+      if(!phi) break;
+      if(isInductionVariable(phi)){
+        headIV = phi;
+        break;
+      }
+    }
+
+    if(!headIV){
+      loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+      continue;
+    }
+
+    for(auto &I : *header){
+      PHINode *phi = dyn_cast<PHINode>(&I);
+      if(!phi) break;
+      if(isExtraInductionVariable(phi))
+        IVMap[headIV].insert(phi);
+    }
+
+    loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+  }
+
+  errs() << "========== IV MAP==========\n";
+  for(auto [phi, extraPHIs] : IVMap){
+    errs() << "SUSAN: headPHI: " << *phi << "\n";
+    for(auto extraPhi : extraPHIs)
+      errs() << "SUSAN: phi: " << *extraPhi << "\n";
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
 
   if(ompFuncs.find(&F) != ompFuncs.end())
@@ -1507,6 +1551,7 @@ bool CWriter::runOnFunction(Function &F) {
 
 
    EliminateDeadInsts(F);
+   FindInductionVariableRelationships();
    printFunction(F);
 
   LI = nullptr;
@@ -1937,6 +1982,29 @@ bool CWriter::isInductionVariable(Value* V){
   return false;
 }
 
+bool CWriter::isExtraInductionVariable(Value* V){
+  if(!V) return false;
+  PHINode *phi = dyn_cast<PHINode>(V);
+  if(!phi) return false;
+
+  Loop* L = LI->getLoopFor(phi->getParent());
+  if(!L) return false;
+  if(L && getInductionVariable(L, SE) == phi) return false;
+
+  Type *PhiTy = phi->getType();
+  if (!PhiTy->isIntegerTy() && !PhiTy->isFloatingPointTy() &&
+      !PhiTy->isPointerTy()){
+    return false;
+  }
+
+  const SCEVAddRecExpr *AddRec = nullptr;
+  if(SE->isSCEVable(PhiTy))
+      AddRec = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(phi));
+  if (!AddRec || !AddRec->isAffine()) return false;
+
+  return true;
+}
+
 bool CWriter::isIVIncrement(Value* V){
   if(!V) return false;
   Instruction* inst = dyn_cast<Instruction>(V);
@@ -1952,6 +2020,30 @@ bool CWriter::isIVIncrement(Value* V){
     if(LI->getLoopFor(predBB) == L && cast<Instruction>(IV->getIncomingValue(i)) == inst)
       return true;
   }
+
+  return false;
+}
+
+
+bool CWriter::isExtraIVIncrement(Value* V){
+  if(!V) return false;
+  Instruction* inst = dyn_cast<Instruction>(V);
+  if(!inst) return false;
+
+  Loop* L = LI->getLoopFor(inst->getParent());
+  if(!L) return false;
+
+  PHINode *IV = getInductionVariable(L, SE);
+  if(!IV || IVMap.find(IV) == IVMap.end()) return false;
+  for(auto relatedIV : IVMap[IV]){
+    for(unsigned i=0; i<relatedIV->getNumIncomingValues(); ++i){
+      BasicBlock *predBB = relatedIV->getIncomingBlock(i);
+      if(LI->getLoopFor(predBB) == L &&
+          cast<Instruction>(relatedIV->getIncomingValue(i)) == inst)
+        return true;
+    }
+  }
+
 
   return false;
 }
@@ -6064,6 +6156,7 @@ void CWriter::printFunction(Function &F) {
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           bool isDeclared = false;
           DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
+          errs() << "SUSAN: declared local: " << *inst << "\n";
           if(isDeclared) omp_declaredLocals[L].insert(inst);
         }
       }
@@ -6610,6 +6703,13 @@ void CWriter::printLoopNew(Loop *L) {
           printComma = false;
           continue;
         }
+
+        if(PHINode* phi = dyn_cast<PHINode>(inst)){
+          auto relatedIVs = IVMap[LP->IV];
+          if(relatedIVs.find(phi) != relatedIVs.end()) continue;
+        }
+        if(isExtraIVIncrement(inst)) continue;
+
         if(printComma) Out << ", ";
         if(printPrivate){
           printPrivate = false;

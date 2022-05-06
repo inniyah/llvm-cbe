@@ -134,6 +134,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   void EliminateDeadInsts(Function &F);
   bool returnDominated;
   std::set<Instruction*> deadInsts;
+  std::map<PHINode*, std::set<PHINode*>> IVMap;
 
   CBERegion topRegion;
 
@@ -381,6 +382,7 @@ private:
   LoopProfile* findLoopProfile(Loop *L);
   void printLoopBody(LoopProfile *LP, Instruction *condInst,  std::set<Value*> &skipInsts);
   bool isInductionVariable(Value* V);
+  bool isExtraInductionVariable(Value* V);
   bool isIVIncrement(Value* V);
   void initializeLoopPHIs(Loop *L);
   void printPHIsIfNecessary(BasicBlock* BB);
@@ -398,6 +400,8 @@ private:
   CBERegion* findRegionOfBlock(BasicBlock* BB);
   bool dominatedByReturn(BasicBlock* brBB);
   void removeBranchTarget(BranchInst *br, int destIdx);
+  void FindInductionVariableRelationships();
+  bool isExtraIVIncrement(Value* V);
 
 
 
