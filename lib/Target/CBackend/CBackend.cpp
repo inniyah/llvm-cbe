@@ -1251,7 +1251,7 @@ void CWriter::preprocessSkippableBranches(Function &F){
                 || cmp->getPredicate() == CmpInst::ICMP_UGT)){
            Value *opnd1 = cmp->getOperand(1);
            if(isa<SelectInst>(opnd1))
-             deadBranches[br] = 1;
+             deadBranches[br] = 0;
         }
       }
       else{
