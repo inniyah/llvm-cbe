@@ -920,7 +920,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
       StoreInst *stInst = nullptr;
 
       if(isInductionVariable(phi)) continue;
-      //if(isExtraInductionVariable(phi)) continue;
+      if(isExtraInductionVariable(phi)) continue;
       for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
         BasicBlock *predBB = phi->getIncomingBlock(i);
         Value *phiVal = phi->getIncomingValue(i);
@@ -1087,7 +1087,8 @@ Value* CWriter::findOriginalValue(Value *val){
 
   Value *newVal = val;
 
-  while(isa<CastInst>(newVal) || isa<LoadInst>(newVal) || isa<PHINode>(newVal)){
+  while(isa<CastInst>(newVal) || isa<LoadInst>(newVal) ||
+      (isa<PHINode>(newVal) && !isInductionVariable(newVal) && !isExtraInductionVariable(newVal))){
     Instruction *currInst = cast<Instruction>(newVal);
     if(isa<CastInst>(newVal) || isa<LoadInst>(newVal))
       newVal = currInst->getOperand(0);
@@ -6554,6 +6555,7 @@ void CWriter::FindLiveInsFor(Loop* L, Value *val){
   errs() << "SUSAN: finding liveins for Loop" << L->getHeader()->getName()<< "\n";
   Instruction *inst = dyn_cast<Instruction>(val);
   if(!inst) return;
+  if(isExtraInductionVariable(inst)) return;
 
   bool isLiveIn = true;
   for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
@@ -6636,6 +6638,7 @@ bool CWriter::isSkipableInst(Instruction* inst){
     if(isInlinableInst(*inst)) return true;
     if(isDirectAlloca(inst)) return true;
     if(isIVIncrement(inst)) return true;
+    if(isExtraIVIncrement(inst)) return true;
 
     if(CallInst* CI = dyn_cast<CallInst>(inst))
       if(Function *F = CI->getCalledFunction())
@@ -6647,14 +6650,16 @@ bool CWriter::isSkipableInst(Instruction* inst){
 
 void CWriter::OMP_RecordLiveIns(LoopProfile *LP){
    Loop *L = LP->L;
+   errs() << "SUSAN: recording livein for loop: " << *L << "\n";
    std::set<BasicBlock*> skipBlocks;
    searchForBlocksToSkip(L, skipBlocks);
    for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
      BasicBlock *BB = L->getBlocks()[i];
      if(skipBlocks.find(BB) != skipBlocks.end()) continue;
      errs() << "SUSAN: finding live-in for" << BB->getName() << "\n";
-     for(auto &I : *BB)
+     for(auto &I : *BB){
        FindLiveInsFor(L, &I);
+     }
    }
    errs() << "SUSAN: finding live-in for lb" << *LP->lb << "\n";
    FindLiveInsFor(L, LP->lb);
