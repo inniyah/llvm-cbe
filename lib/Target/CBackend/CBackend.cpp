@@ -3208,6 +3208,55 @@ void CWriter::writeOperandInternal(Value *Operand,
     writeOperandInternal(deleteAndReplaceInsts[inst]);
     return;
   }
+
+  if(isExtraInductionVariable(Operand)){
+    PHINode *phi = dyn_cast<PHINode>(Operand);
+    for(auto [iv, relatedIVs] : IVMap)
+      if(relatedIVs.find(phi) != relatedIVs.end()){
+        writeOperandInternal(iv);
+
+        Value *offset = nullptr;
+        for(auto LP : LoopProfiles){
+          if(LP->IV == iv){
+            if(!LP->lbAlloca || !LP->incr) break;
+            errs() << "SUSAN: main IV's lb: " << *LP->lb << "\n";
+            errs() << "SUSAN: main IV's lballoca: " << *LP->lbAlloca << "\n";
+            errs() << "SUSAN: main IV's incr: " << *LP->incr << "\n";
+
+
+
+            Value *initVal = nullptr;
+            Instruction *incrementInst = nullptr;
+            for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
+              BasicBlock *predBB = phi->getIncomingBlock(i);
+              if(LI->getLoopFor(predBB) != LP->L)
+                initVal = phi->getIncomingValue(i);
+              else
+                incrementInst = dyn_cast<Instruction>(phi->getIncomingValue(i));
+            }
+
+
+            //check if IV steps are the same
+            if(incrementInst->getOperand(1) != LP->incr) break;
+            assert(initVal && "relatedIV doesn't have initVal??\n");
+
+            errs() << "SUSAN: relatedIV's init val: " << *initVal << "\n";
+            if(BinaryOperator *binOp = dyn_cast<BinaryOperator>(initVal)){
+              Value* opnd0 = binOp->getOperand(0);
+              opnd0 = findOriginalValue(opnd0);
+              errs() << "SUSAN: relatedIV original opnd0: " << *opnd0 << "\n";
+              if(opnd0 == LP->lbAlloca)
+                offset = binOp->getOperand(1);
+            }
+          }
+        }
+
+        if(offset)
+          writeOperandInternal(offset);
+        return;
+      }
+  }
+
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
