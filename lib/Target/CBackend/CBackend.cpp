@@ -1194,11 +1194,33 @@ void CWriter::preprocessLoopProfiles(Function &F){
 
 
 
+void CWriter::removeBranchTarget(BranchInst *br, int destIdx){
+  errs() << "SUSAN: removing branch target: " << *br << "\n";
+  IRBuilder<> brBuilder(br);
+  std::set<BasicBlock*>succBB2Remove;
+  for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
+	  BasicBlock *succBB = *succ;
+    if(br->getSuccessor(destIdx) == succBB) continue;
+    for (pred_iterator PI = pred_begin(succBB), E = pred_end(succBB); PI != E; ++PI)
+      if(*PI == br->getParent())
+        succBB2Remove.insert(succBB);
+    errs() << "SUSAN: inserting succBB: " << succBB->getName() << "\n";
+  }
+  for(auto succBB : succBB2Remove){
+    errs() << "SUSAN: removing succBB" << *succBB << "\n";
+    succBB->removePredecessor(br->getParent());
+  }
+
+  Value *newBr = brBuilder.CreateBr(br->getSuccessor(destIdx));
+}
+
 void CWriter::preprocessSkippableBranches(Function &F){
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     BranchInst *br = dyn_cast<BranchInst>(&*I);
     if(!br) continue;
     if(!br->isConditional()) continue;
+    Loop* L = LI->getLoopFor(br->getParent());
+    if(L && L->getLoopLatch()->getTerminator() == br) continue;
     ICmpInst *cmp = dyn_cast<ICmpInst>(br->getCondition());
     if(!cmp) continue;
 
@@ -1234,8 +1256,9 @@ void CWriter::preprocessSkippableBranches(Function &F){
 
         if(UpperBound == opnd0){
            if ((cmp->getPredicate() == CmpInst::ICMP_SGT
-                || cmp->getPredicate() == CmpInst::ICMP_UGT))
+                || cmp->getPredicate() == CmpInst::ICMP_UGT)){
             deadBranches[br] = 0;
+           }
         }
         else if(UpperBound == opnd1){
           bool negateCondition = false;
@@ -1243,15 +1266,17 @@ void CWriter::preprocessSkippableBranches(Function &F){
           if(cmp == condInst) continue;
 
           if (cmp->getPredicate() == CmpInst::ICMP_SLT
-              || cmp->getPredicate() == CmpInst::ICMP_ULT)
-          deadBranches[br] = 0;
+              || cmp->getPredicate() == CmpInst::ICMP_ULT){
+            deadBranches[br] = 0;
+          }
         }
         else if(LP->lbAlloca == opnd0
             && (cmp->getPredicate() == CmpInst::ICMP_SGT
                 || cmp->getPredicate() == CmpInst::ICMP_UGT)){
            Value *opnd1 = cmp->getOperand(1);
-           if(isa<SelectInst>(opnd1))
-             deadBranches[br] = 0;
+           if(isa<SelectInst>(opnd1)){
+             deadBranches[br] = 1;
+           }
         }
       }
       else{
@@ -1278,10 +1303,20 @@ void CWriter::preprocessSkippableBranches(Function &F){
           errs() << "SUSAN: found deadbranch for while loop: " << *br << "\n";
           deadBranches[br] = 0;
         }
-        else
+        else{
           deadBranches[br] = 1;
+        }
       }
     }
+  }
+
+  for(auto [branch, dest] : deadBranches)
+    removeBranchTarget(branch, dest);
+  for(auto [branch, dest] : deadBranches)
+    branch->eraseFromParent();
+
+  for(auto &BB : F){
+    errs() << "SUSAN: BB:" << BB << "\n";
   }
 }
 
@@ -1441,7 +1476,10 @@ bool CWriter::runOnFunction(Function &F) {
    omp_preprossesing(F);
   preprocessSkippableInsts(F);
   preprocessLoopProfiles(F);
+  deadBranches.clear();
   preprocessSkippableBranches(F);
+  PDT->recalculate(F);
+  DT->recalculate(F);
   //SUSAN: determine whether the function can be compiled without gotos
   std::set<BasicBlock*> visitedBBs;
   markIfBranches(F, &visitedBBs); //2
@@ -6056,6 +6094,7 @@ void CWriter::printFunction(Function &F) {
     std::set<BasicBlock*> visited;
     toVisit.push(&F.getEntryBlock());
     visited.insert(&F.getEntryBlock());
+    errs() << "SUSAN: adding entry block: " << F.getEntryBlock() << "\n";
     while(!toVisit.empty()){
 	    BasicBlock *currBB = toVisit.front();
 	    toVisit.pop();
@@ -6077,14 +6116,14 @@ void CWriter::printFunction(Function &F) {
 
       CBERegion *R = findRegionOfBlock(currBB);
       if(BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator())){
-        if(deadBranches.find(br) != deadBranches.end()){
+        /*if(deadBranches.find(br) != deadBranches.end()){
           BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
           if(visited.find(succBB) == visited.end()){
             toVisit.push(succBB);
             visited.insert(succBB);
           }
-        }
-        else{
+        }*/
+        //else{
           errs() << "SUSAN: br:" << *br << "\n";
           BasicBlock *succ0 = br->getSuccessor(0);
           if(R && !nodeBelongsToRegion(succ0, R)) continue;
@@ -6100,7 +6139,7 @@ void CWriter::printFunction(Function &F) {
             toVisit.push(succ1);
             visited.insert(succ1);
           }
-        }
+        //}
       } else {
 	      for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
 		      BasicBlock *succBB = *succ;
@@ -6199,6 +6238,7 @@ BasicBlock* findDoWhileExitingLatchBlock(Loop *L){
 
   //Assuming loops are all rotated
   BasicBlock *latch = L->getLoopLatch();
+  errs() << "SUSAN: latch " << *latch << "\n";
   BranchInst *br = dyn_cast<BranchInst>(latch->getTerminator());
   assert(br && "latch doesn't end with branch inst??\n");
   if(!br->isConditional())
@@ -6210,6 +6250,8 @@ BasicBlock* findDoWhileExitingLatchBlock(Loop *L){
 Instruction* CWriter::findCondInst(Loop *L, bool &negateCondition){
 
   BasicBlock *condBB = findDoWhileExitingLatchBlock(L);
+  if(!condBB) errs() << "SUSAN: no condBB!!!";
+  errs() << "Loop: " << *L << "\n";
   Instruction* term = condBB->getTerminator();
   BranchInst* brInst = dyn_cast<BranchInst>(term);
   Value *cond = brInst->getCondition();
@@ -7255,31 +7297,31 @@ void CWriter::recordTimes2bePrintedForBranch(BasicBlock* start, BasicBlock *brBl
         toVisit.pop();
 
         BranchInst *br = dyn_cast<BranchInst>(currBB->getTerminator());
-        if(br && deadBranches.find(br) != deadBranches.end()){
-          BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
-          bool alreadyVisited = false;
-          for(auto visitedEdge : visited)
-            if(visitedEdge.first == currBB && visitedEdge.second == succBB)
-              alreadyVisited = true;
+        //if(br && deadBranches.find(br) != deadBranches.end()){
+        //  BasicBlock *succBB = br->getSuccessor(deadBranches[br]);
+        //  bool alreadyVisited = false;
+        //  for(auto visitedEdge : visited)
+        //    if(visitedEdge.first == currBB && visitedEdge.second == succBB)
+        //      alreadyVisited = true;
 
-          bool backEdgeDetected = false;
-          for(auto backedge : backEdges)
-            if(backedge.first == currBB && backedge.second  == succBB)
-              backEdgeDetected = true;
+        //  bool backEdgeDetected = false;
+        //  for(auto backedge : backEdges)
+        //    if(backedge.first == currBB && backedge.second  == succBB)
+        //      backEdgeDetected = true;
 
-          Loop *L = LI->getLoopFor(succBB);
-          if(L && L->getLoopLatch() == currBB){
-            errs() << "SUSAN: found latch" << currBB->getName() << "\n";
-            backEdgeDetected = true;
-          }
+        //  Loop *L = LI->getLoopFor(succBB);
+        //  if(L && L->getLoopLatch() == currBB){
+        //    errs() << "SUSAN: found latch" << currBB->getName() << "\n";
+        //    backEdgeDetected = true;
+        //  }
 
-          if(!alreadyVisited && !backEdgeDetected){
-            visitedNodes.insert(succBB);
-            visited.insert(std::make_pair(currBB,succBB));
-            toVisit.push(std::make_pair(currBB,succBB));
-          }
-          continue;
-        }
+        //  if(!alreadyVisited && !backEdgeDetected){
+        //    visitedNodes.insert(succBB);
+        //    visited.insert(std::make_pair(currBB,succBB));
+        //    toVisit.push(std::make_pair(currBB,succBB));
+        //  }
+        //  continue;
+        //}
 
         for (auto succ = succ_begin(currBB); succ != succ_end(currBB); ++succ){
             BasicBlock *succBB = *succ;
@@ -7378,6 +7420,7 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   //special case: unconditional branch
   if(!I.isConditional()){
     //printPHICopiesForSuccessor(I.getParent(), I.getSuccessor(0), 0);
+    errs() << "printing unconditional branch " << I << "\n";
     printBranchToBlock(I.getParent(), I.getSuccessor(0), 0);
     return;
   }
@@ -7385,18 +7428,18 @@ void CWriter::naturalBranchTranslation(BranchInst &I){
   //special case: branch is dead
   BasicBlock *brBB = I.getParent();
   CBERegion *cbeRegion = CBERegionMap[brBB];
-  if(deadBranches.find(&I) != deadBranches.end()){
-    errs() << "statically proven dead branch: " << I << "\n";
+  //if(deadBranches.find(&I) != deadBranches.end()){
+  //  errs() << "statically proven dead branch: " << I << "\n";
 
-    Loop *L = LI->getLoopFor(brBB);
-    if(L && L->getHeader() == brBB){
-      printBranchToBlock(I.getParent(), I.getSuccessor(deadBranches[&I]), 0);
-      return;
-    }
+  //  Loop *L = LI->getLoopFor(brBB);
+  //  if(L && L->getHeader() == brBB){
+  //    printBranchToBlock(I.getParent(), I.getSuccessor(deadBranches[&I]), 0);
+  //    return;
+  //  }
 
-    emitIfBlock(cbeRegion, deadBranches[&I]);
-    return;
-  }
+  //  emitIfBlock(cbeRegion, deadBranches[&I]);
+  //  return;
+  //}
 
   //special case: print goto branch
   if(gotoBranches.find(&I) != gotoBranches.end()){

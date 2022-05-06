@@ -397,6 +397,7 @@ private:
   Value* findOriginalValue(Value *val);
   CBERegion* findRegionOfBlock(BasicBlock* BB);
   bool dominatedByReturn(BasicBlock* brBB);
+  void removeBranchTarget(BranchInst *br, int destIdx);
 
 
 
