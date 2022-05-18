@@ -1490,11 +1490,17 @@ void CWriter::FindInductionVariableRelationships(){
 }
 
 bool CWriter::runOnFunction(Function &F) {
+  static bool findOMPFuncs = false;
+  if(!findOMPFuncs)
+    findOMPFunctions(*(F.getParent()));
+  findOMPFuncs = true;
 
-  if(ompFuncs.find(&F) != ompFuncs.end())
-    IS_OPENMP_FUNCTION = true;
-  else
-    IS_OPENMP_FUNCTION = false;
+  IS_OPENMP_FUNCTION = false;
+  for(auto [call, utask] : ompFuncs){
+    errs() << "OMP FUNC: " << *utask << "\n";
+    if(utask == &F)
+      IS_OPENMP_FUNCTION = true;
+  }
 
   // Do not codegen any 'available_externally' functions at all, they have
   // definitions outside the translation unit.
@@ -3953,6 +3959,32 @@ bool CWriter::doFinalization(Module &M) {
   return true; // may have lowered an IntrinsicCall
 }
 
+void CWriter::findOMPFunctions(Module &M){
+  /*
+   * OpenMP: search for openmp functions
+   */
+  for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI) {
+    Function *F = &*FI;
+    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
+      CallInst *callInst = dyn_cast<CallInst>(&*I);
+      if(!callInst) continue;
+      if(Function *F = callInst->getCalledFunction()){
+        if(F->getName() == "__kmpc_fork_call"){
+          ConstantExpr* utaskCast = dyn_cast<ConstantExpr>(callInst->getArgOperand(2));
+          Function* utask;
+          if(utaskCast && utaskCast->isCast())
+            utask = dyn_cast<Function>(utaskCast->getOperand(0));
+          else
+            utask = dyn_cast<Function>(callInst->getArgOperand(2));
+
+          errs() << "SUSAN: adding utask" << *utask << "\n";
+          ompFuncs[callInst] = utask;
+        }
+      }
+    }
+  }
+}
+
 void CWriter::generateHeader(Module &M) {
   // Keep track of which functions are static ctors/dtors so they can have
   // an attribute added to their prototypes.
@@ -4126,7 +4158,13 @@ void CWriter::generateHeader(Module &M) {
   // Store the intrinsics which will be declared/defined below.
   SmallVector<Function *, 16> intrinsicsToDefine;
 
+  findOMPFunctions(M);
+
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
+    /*
+     * OpenMP: skip declaring kmpc functions
+     */
+    if((&*I)->getName().contains("__kmpc")) continue;
     // Don't print declarations for intrinsic functions.
     // Store the used intrinsics, which need to be explicitly defined.
     if (I->isIntrinsic()) {
@@ -4186,11 +4224,16 @@ void CWriter::generateHeader(Module &M) {
       Out << "extern ";
 
     /*
-     * OpenMP: FIXME: shouldn't based on .omp name
+     * OpenMP: declare outlined functions
      */
-    if((&*I)->getName().contains(".omp"))
-      printFunctionProto(Out, &*I, 2);
-    else
+    bool printedOmpDec = false;
+    for(auto [call, utask] : ompFuncs)
+      if(&*I == utask){
+        printFunctionProto(Out, &*I, 2);
+        printedOmpDec = true;
+      }
+
+    if(!printedOmpDec)
       printFunctionProto(Out, &*I);
 
 
@@ -8707,22 +8750,17 @@ void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
 
+  //skip barrier
+  if(Function *F = I.getCalledFunction())
+    if(F->getName() == "__kmpc_barrier") return;
+
   /*
    * OpenMP: skip omp runtime call
    */
-  if(Function *F = I.getCalledFunction()){
-    if(F->getName() == "__kmpc_barrier") return;
-    if(F->getName() == "__kmpc_fork_call"){
+  if(ompFuncs.find(&I) != ompFuncs.end()){
       Out << "  #pragma omp parallel \n" << "\n";
-
-      ConstantExpr* utaskCast = dyn_cast<ConstantExpr>(I.getArgOperand(2));
-      Function* utask;
-      if(utask && utaskCast->isCast())
-        utask = dyn_cast<Function>(utaskCast->getOperand(0));
-      else
-        utask = dyn_cast<Function>(I.getArgOperand(2));
-
       // Create a Call to omp_outlined
+      auto utask = ompFuncs[&I];
       Out << "  " << GetValueName(utask) << "(";
 
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
@@ -8734,12 +8772,8 @@ void CWriter::visitCallInst(CallInst &I) {
         writeOperand(arg, ContextCasted);
         printComma = true;
       }
-
-      ompFuncs.insert(utask);
-
       Out << ");\n";
       return;
-    }
   }
 
   if (isa<InlineAsm>(I.getCalledOperand()))

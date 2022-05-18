@@ -117,7 +117,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<SExtInst*, Instruction*> declareAsCastedType;
   std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
   std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
-  std::set<Function*> ompFuncs;
+  std::map<CallInst*, Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
   bool IS_OPENMP_FUNCTION;
   std::set<LoopProfile*> LoopProfiles;
@@ -402,6 +402,7 @@ private:
   void removeBranchTarget(BranchInst *br, int destIdx);
   void FindInductionVariableRelationships();
   bool isExtraIVIncrement(Value* V);
+  void findOMPFunctions(Module &M);
 
 
 
