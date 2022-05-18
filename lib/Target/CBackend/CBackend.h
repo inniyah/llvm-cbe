@@ -69,6 +69,7 @@ typedef struct LoopProfile{
   Value *lb;
   Value *incr;
   PHINode *IV;
+  Instruction *IVInc;
   bool isOmpLoop;
   bool barrier;
   Value* lbAlloca;
@@ -135,6 +136,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool returnDominated;
   std::set<Instruction*> deadInsts;
   std::map<PHINode*, std::set<PHINode*>> IVMap;
+  std::map<Instruction*, PHINode*> IVInc2IV;
 
   CBERegion topRegion;
 
@@ -403,6 +405,8 @@ private:
   void FindInductionVariableRelationships();
   bool isExtraIVIncrement(Value* V);
   void findOMPFunctions(Module &M);
+  Instruction *getIVIncrement(Loop *L, PHINode* IV);
+  void preprocessIVIncrements();
 
 
 

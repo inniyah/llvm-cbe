@@ -819,6 +819,16 @@ void CWriter::determineControlFlowTranslationMethod(Function &F){
 
 }
 
+Instruction *CWriter::getIVIncrement(Loop *L, PHINode* IV) {
+  if(!IV) return nullptr;
+  for(unsigned i=0; i<IV->getNumIncomingValues(); ++i){
+    BasicBlock *predBB = IV->getIncomingBlock(i);
+    if(LI->getLoopFor(predBB) == L)
+      return dyn_cast<Instruction>(IV->getIncomingValue(i));
+  }
+  return nullptr;
+}
+
 PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
   errs() << "trying to get IV for Loop:" << *L << "\n";
   PHINode *InnerIndexVar = L->getCanonicalInductionVariable();
@@ -974,6 +984,10 @@ Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFi
             //}
           }
         }
+
+        Argument *arg = dyn_cast<Argument>(store->getOperand(0));
+        if(arg)
+          return arg;
       }
   }
   errs() << "SUSAN: ub: " << *ub << "\n";
@@ -1021,6 +1035,7 @@ void CWriter::omp_preprossesing(Function &F){
           //find ub & incr
           int ubOffset = 0;
           ompLP->ub = findOriginalUb(F, CI->getArgOperand(5), initCI, finiCI, ubOffset);
+          errs() << "SUSAN: original ub: " << *(ompLP->ub) << "\n";
           ompLP->ubOffset = ubOffset;
           ompLP->incr = CI->getArgOperand(7);
           currLP = ompLP;
@@ -1058,6 +1073,7 @@ void CWriter::omp_preprossesing(Function &F){
           currLP->barrier = false;
           countBarrier = 0;
           currLP->IV = getInductionVariable(ompLoop, SE);
+          currLP->IVInc = getIVIncrement(currLP->L, currLP->IV);
           currLP->isForLoop = true;
           LoopProfiles.insert(currLP);
         }
@@ -1136,6 +1152,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
       LP->isForLoop = false;
       LP->L = L;
       LP->IV = nullptr;
+      LP->IVInc = nullptr;
       LP->ub = nullptr;
       LP->lb = nullptr;
       LP->incr = nullptr;
@@ -1155,6 +1172,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
     LP->isForLoop = true;
     LP->L = L;
     LP->IV = IV;
+    LP->IVInc = getIVIncrement(L, IV);
 
     if(LI->getLoopFor(IV->getIncomingBlock(0)) != L)
       LP->lb = IV->getIncomingValue(0);
@@ -1489,6 +1507,19 @@ void CWriter::FindInductionVariableRelationships(){
   }
 }
 
+void CWriter::preprocessIVIncrements(){
+  std::list<Loop*> loops( LI->begin(), LI->end() );
+  while( !loops.empty() )
+  {
+    Loop *L = loops.front();
+    loops.pop_front();
+    LoopProfile* LP = findLoopProfile(L);
+    IVInc2IV[LP->IVInc] = LP->IV;
+    loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
   static bool findOMPFuncs = false;
   if(!findOMPFuncs)
@@ -1559,6 +1590,7 @@ bool CWriter::runOnFunction(Function &F) {
 
    EliminateDeadInsts(F);
    FindInductionVariableRelationships();
+   preprocessIVIncrements();
    printFunction(F);
 
   LI = nullptr;
@@ -3136,6 +3168,11 @@ std::string CWriter::GetValueName(Value *Operand) {
   if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Operand)) {
     Operand = GA->getAliasee();
   }
+
+  // use IV name for IVInc
+  Instruction *incInst = dyn_cast<Instruction>(Operand);
+  if(IVInc2IV.find(incInst) != IVInc2IV.end())
+    return GetValueName(IVInc2IV[incInst]);
 
   std::string Name{Operand->getName()};
   if (Name.empty()) { // Assign unique names to local temporaries.
