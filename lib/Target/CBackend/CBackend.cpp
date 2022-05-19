@@ -963,7 +963,7 @@ void CWriter::preprossesPHIs2Print(Function &F){
     }
 }
 
-Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset){
+Value* CWriter::findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset){
   bool startSearching = prevFini ? false : true;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
     if(&*I == initCI) break;
@@ -986,8 +986,10 @@ Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFi
         }
 
         Argument *arg = dyn_cast<Argument>(store->getOperand(0));
-        if(arg)
+        if(arg){
+          UpperBoundArgs.insert(arg);
           return arg;
+        }
       }
   }
   errs() << "SUSAN: ub: " << *ub << "\n";
@@ -6385,29 +6387,41 @@ void CWriter::printFunction(Function &F) {
   Out << "}\n\n";
 }
 
-void CWriter::printCmpOperator(ICmpInst *icmp){
+void CWriter::printCmpOperator(ICmpInst *icmp, bool negateCondition){
     switch (icmp->getPredicate()) {
     case ICmpInst::ICMP_EQ:
-      Out << " == ";
+      if(negateCondition)
+        Out << "!=";
+      else Out << " == ";
       break;
     case ICmpInst::ICMP_NE:
-      Out << " != ";
+      if(negateCondition)
+        Out << "==";
+      else Out << " != ";
       break;
     case ICmpInst::ICMP_ULE:
     case ICmpInst::ICMP_SLE:
-      Out << " <= ";
+      if(negateCondition)
+        Out << ">";
+      else Out << " <= ";
       break;
     case ICmpInst::ICMP_UGE:
     case ICmpInst::ICMP_SGE:
-      Out << " >= ";
+      if(negateCondition)
+        Out << "<";
+      else Out << " >= ";
       break;
     case ICmpInst::ICMP_ULT:
     case ICmpInst::ICMP_SLT:
-      Out << " < ";
+      if(negateCondition)
+        Out << ">=";
+      else Out << " < ";
       break;
     case ICmpInst::ICMP_UGT:
     case ICmpInst::ICMP_SGT:
-      Out << " > ";
+      if(negateCondition)
+        Out << "<=";
+      else Out << " > ";
       break;
     default:
       DBG_ERRS("Invalid icmp predicate!" << *icmp);
@@ -6893,8 +6907,16 @@ void CWriter::printLoopNew(Loop *L) {
     if(LP->isOmpLoop){
       Out << GetValueName(LP->IV);
       errs() << "SUSAN: condInst: " << *condInst << "\n";
-      printCmpOperator(dyn_cast<ICmpInst>(condInst));
+      printCmpOperator(dyn_cast<ICmpInst>(condInst), negateCondition);
+
+
+      if(UpperBoundArgs.find(LP->ub) != UpperBoundArgs.end())
+        Out << "(";
       writeOperandInternal(LP->ub);
+      if(UpperBoundArgs.find(LP->ub) != UpperBoundArgs.end())
+        Out << " - 1)";
+
+
       if(LP->ubOffset)
         Out << LP->ubOffset;
     } else {

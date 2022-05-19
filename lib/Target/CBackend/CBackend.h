@@ -137,6 +137,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<Instruction*> deadInsts;
   std::map<PHINode*, std::set<PHINode*>> IVMap;
   std::map<Instruction*, PHINode*> IVInc2IV;
+  std::set<Value*> UpperBoundArgs;
 
   CBERegion topRegion;
 
@@ -346,7 +347,7 @@ private:
   void NodeSplitting(Function &F);
   void markIfBranches(Function &F, std::set<BasicBlock*> *visitedBBs);
   void markGotoBranches(Function &F);
-  void printCmpOperator(ICmpInst *icmp);
+  void printCmpOperator(ICmpInst *icmp, bool negateCondition = false);
   void printInstruction(Instruction *I, bool printSemiColon = true);
   void printPHICopiesForAllPhis(BasicBlock *CurBlock, unsigned Indent);
   void emitSwitchBlock(BasicBlock* start, BasicBlock *brBlockk);
@@ -407,6 +408,7 @@ private:
   void findOMPFunctions(Module &M);
   Instruction *getIVIncrement(Loop *L, PHINode* IV);
   void preprocessIVIncrements();
+  Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset);
 
 
 
