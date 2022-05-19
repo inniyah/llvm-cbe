@@ -6025,6 +6025,9 @@ void CWriter::printFunction(Function &F) {
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
               if (Instruction *valInst = dyn_cast<Instruction>(valV)){
 
+                if(isa<TruncInst>(valInst))
+                  valInst = dyn_cast<Instruction>(valInst->getOperand(0));
+
                 if( Var2IRs.find(varName) == Var2IRs.end() )
                   Var2IRs[varName] = std::set<Instruction*>();
                 Var2IRs[varName].insert(valInst);
