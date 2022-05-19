@@ -1556,6 +1556,7 @@ bool CWriter::runOnFunction(Function &F) {
    * OpenMP: preprosessings
    */
   LoopProfiles.clear();
+  omp_declaredLocals.clear();
   if(IS_OPENMP_FUNCTION)
    omp_preprossesing(F);
   preprocessSkippableInsts(F);
@@ -6921,11 +6922,18 @@ void CWriter::printLoopNew(Loop *L) {
         Out << LP->ubOffset;
     } else {
       errs() << "SUSAN: condInst:" << *condInst << "\n";
-      if(negateCondition)
-        Out << "!(";
-      writeOperand(condInst);
-      if(negateCondition)
-        Out << ")";
+
+      Out << GetValueName(condInst->getOperand(0));
+      printCmpOperator(dyn_cast<ICmpInst>(condInst), negateCondition);
+
+      if(condInst->getOperand(0) == LP->IV
+          || condInst->getOperand(1) == LP->IV)
+      Out << "(";
+      writeOperandInternal(LP->ub);
+      if(condInst->getOperand(0) == LP->IV
+          || condInst->getOperand(1) == LP->IV)
+      Out << " + 1)";
+
     }
 
     Out << ";";
