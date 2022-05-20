@@ -5837,6 +5837,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      PrintedVar = true;
      isDeclared = true;
    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
+     errs() << "SUSAN: inst at 5840: " << *I << "\n";
 
     /*
      * OpenMP: skip some declarations related to OpenMP calls
@@ -5884,33 +5885,6 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
 
      PrintedVar = true;
      isDeclared = true;
-    // if (isa<PHINode>(*I) && isNotDuplicatedDeclaration(I, true)) { // Print out PHI node temporaries as well...
-    //   Out << "  ";
-
-    //   bool printedType = false;
-    //   for(auto [sextInst, inst] : declareAsCastedType)
-    //     if(inst == &*I){
-    //       printTypeName(Out, sextInst->getType(), true)
-    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-    //       printedType = true;
-    //       break;
-    //     }
-
-    //   if(!printedType){
-    //     if(signedInsts.find(&*I) != signedInsts.end())
-    //       printTypeName(Out, I->getType(), true)
-    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-    //     else
-    //       printTypeName(Out, I->getType(), false)
-    //         << ' ' << (GetValueName(&*I) + "__PHI_TEMPORARY");
-    //   }
-
-    //   Out << ";\n";
-
-    //   // all the insts associated with this variable counts as declared
-    //   // Shouldn't need this code here but in case there exists empty phi
-    //   insertDeclaredInsts(&*I);
-    // }
    }
    // We need a temporary for the BitCast to use so it can pluck a value out
    // of a union to do the BitCast. This is separate from the need for a
@@ -6025,7 +5999,7 @@ void CWriter::printFunction(Function &F) {
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
               if (Instruction *valInst = dyn_cast<Instruction>(valV)){
 
-                if(isa<TruncInst>(valInst))
+                if(isa<TruncInst>(valInst) || isa<BitCastInst>(valInst))
                   valInst = dyn_cast<Instruction>(valInst->getOperand(0));
 
                 if( Var2IRs.find(varName) == Var2IRs.end() )
@@ -6284,12 +6258,17 @@ void CWriter::printFunction(Function &F) {
         BasicBlock *BB = L->getBlocks()[i];
         for(auto &I : *BB){
           Instruction *inst = &I;
+          errs() << "SUSAN: at 6288: " << *inst << "\n";
           if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
           //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
           //if(deadInsts.find(inst) != deadInsts.end()) continue;
-          if(isSkipableInst(inst)) continue;
+          if(isInlinableInst(*inst))
+            errs() << "SUSAN: isinlinable!! " << *inst << "\n";
+          if(isSkipableInst(inst) && !isInlinableInst(*inst)) continue;
+          errs() << "SUSAN: at 6293: " << *inst << "\n";
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
+          errs() << "SUSAN: at 6296: " << *inst << "\n";
           bool isDeclared = false;
           DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
           errs() << "SUSAN: declared local: " << *inst << "\n";
@@ -6302,6 +6281,16 @@ void CWriter::printFunction(Function &F) {
       bool isDeclared = false;
       DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
       //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
+
+
+      //declare all the liveins
+      if(omp_liveins.find(L) != omp_liveins.end()){
+        for(auto livein : omp_liveins[L]){
+          isDeclared = false;
+          DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
+        }
+      }
+
     }
   }
     /*for(auto LP : LoopProfiles){
