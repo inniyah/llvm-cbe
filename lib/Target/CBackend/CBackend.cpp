@@ -1375,6 +1375,13 @@ void CWriter::EliminateDeadInsts(Function &F){
       if(LP->isForLoop)
         OMP_RecordLiveIns(LP);
 
+    errs() << "==========omp liveins========\n";
+    for(auto [L, liveins] : omp_liveins){
+      errs() << "loop: " << *L << "\n";
+      for(auto livein : liveins)
+        errs() << "livein: " << *livein << "\n";
+    }
+    errs() << "==========omp liveins end========\n";
 
     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
       Instruction *inst = &*I;
@@ -1557,6 +1564,7 @@ bool CWriter::runOnFunction(Function &F) {
    */
   LoopProfiles.clear();
   omp_declaredLocals.clear();
+  omp_liveins.clear();
   if(IS_OPENMP_FUNCTION)
    omp_preprossesing(F);
   preprocessSkippableInsts(F);
@@ -6824,9 +6832,14 @@ void CWriter::printLoopNew(Loop *L) {
   LoopProfile *LP = findLoopProfile(L);
   if(LP->isForLoop){
 
+    std::set<Instruction*> printedLiveins;
     if(LP->isOmpLoop){
-      for(auto I : omp_liveins[L])
+      /*for(auto I : omp_liveins[L]){
+        if(printedLiveins.find(I) != printedLiveins.end()) continue;
+        printedLiveins.insert(I);
+        errs() << "SUSAN: printing inst: " << *I << "\n";
         printInstruction(I);
+      }*/
 
       Out << "#pragma omp for";
 
