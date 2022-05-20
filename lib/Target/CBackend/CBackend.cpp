@@ -1189,7 +1189,8 @@ void CWriter::preprocessLoopProfiles(Function &F){
     bool negateCondition = false;
     Instruction *condInst = findCondInst(LP->L, negateCondition);
     Value *ub = condInst->getOperand(1);
-    LP->ub = findOriginalValue(ub);
+    //LP->ub = findOriginalValue(ub);
+    LP->ub = ub;
     errs() << "none omp loop ub: " << *LP->ub << "\n";
 
     LP->lbAlloca = nullptr;
@@ -6918,7 +6919,7 @@ void CWriter::printLoopNew(Loop *L) {
 
       if(UpperBoundArgs.find(LP->ub) != UpperBoundArgs.end())
         Out << "(";
-      writeOperandInternal(LP->ub);
+       writeOperandInternal(LP->ub);
       if(UpperBoundArgs.find(LP->ub) != UpperBoundArgs.end())
         Out << " - 1)";
 
