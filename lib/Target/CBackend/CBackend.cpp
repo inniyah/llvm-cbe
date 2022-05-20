@@ -1271,15 +1271,16 @@ void CWriter::preprocessSkippableBranches(Function &F){
 
     for(auto LP : LoopProfiles){
       if(LP->isForLoop){
-        Value *UpperBound = LP->ub;
+        Value *UpperBound = findOriginalValue(LP->ub);
         errs() << "SUSAN: LP->ub: "  << *LP->ub << "\n";
-        if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub))
-          UpperBound = ldUB->getPointerOperand();
+        //if(LoadInst *ldUB = dyn_cast<LoadInst>(LP->ub))
+        //  UpperBound = ldUB->getPointerOperand();
         errs() << "SUSAN: upperbound: "  << *LP->ub << "\n";
 
         if(UpperBound == opnd0){
            if ((cmp->getPredicate() == CmpInst::ICMP_SGT
                 || cmp->getPredicate() == CmpInst::ICMP_UGT)){
+            errs() << "SUSAN: deadbranch: " << *br << "\n";
             deadBranches[br] = 0;
            }
         }
@@ -6295,6 +6296,7 @@ void CWriter::printFunction(Function &F) {
       //declare all the liveins
       if(omp_liveins.find(L) != omp_liveins.end()){
         for(auto livein : omp_liveins[L]){
+          if(isSkipableInst(livein)) continue;
           isDeclared = false;
           DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
         }
