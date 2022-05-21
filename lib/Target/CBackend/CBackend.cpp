@@ -4277,8 +4277,10 @@ void CWriter::generateHeader(Module &M) {
      * OpenMP: declare outlined functions
      */
     bool printedOmpDec = false;
+    std::set<Function*> printedFunction;
     for(auto [call, utask] : ompFuncs)
-      if(&*I == utask){
+      if(&*I == utask && printedFunction.find(utask) == printedFunction.end()){
+        printedFunction.insert(utask);
         printFunctionProto(Out, &*I, 2);
         printedOmpDec = true;
       }
