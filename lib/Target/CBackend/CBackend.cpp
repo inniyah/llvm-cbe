@@ -6298,6 +6298,7 @@ void CWriter::printFunction(Function &F) {
         for(auto livein : omp_liveins[L]){
           if(isSkipableInst(livein)) continue;
           isDeclared = false;
+          errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
           DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
         }
       }
@@ -6804,7 +6805,10 @@ void CWriter::OMP_RecordLiveIns(LoopProfile *LP){
      BasicBlock *BB = L->getBlocks()[i];
      if(skipBlocks.find(BB) != skipBlocks.end()) continue;
      errs() << "SUSAN: finding live-in for" << BB->getName() << "\n";
+
      for(auto &I : *BB){
+       bool negateCondition;
+       if(LP->isOmpLoop && findCondInst(L, negateCondition) == &I) continue;
        FindLiveInsFor(L, &I);
      }
    }
@@ -8076,26 +8080,26 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
       else if(opcode == Instruction::SDiv){
         Type* op0Ty = (I.getOperand(0))->getType();
         Type* op1Ty = (I.getOperand(1))->getType();
-        if(op0Ty->isIntegerTy(32))
-          Out << "(int)";
-        else if(op0Ty->isIntegerTy(64))
-          Out << "(long long)";
-        else if(op0Ty->isFloatTy())
-          Out << "(float)";
-        else if(op0Ty->isDoubleTy())
-          Out << "(double)";
-        else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
+        //if(op0Ty->isIntegerTy(32))
+        //  Out << "(int)";
+        //else if(op0Ty->isIntegerTy(64))
+        //  Out << "(long long)";
+        //else if(op0Ty->isFloatTy())
+        //  Out << "(float)";
+        //else if(op0Ty->isDoubleTy())
+        //  Out << "(double)";
+        //else assert(0 && "SUSAN: op0Ty unimplemented cast?\n");
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " / ";
-        if(op1Ty->isIntegerTy(32))
-          Out << "(int)";
-        else if(op1Ty->isIntegerTy(64))
-          Out << "(long long)";
-        else if(op1Ty->isFloatTy())
-          Out << "(float)";
-        else if(op1Ty->isDoubleTy())
-          Out << "(double)";
-        else assert(0 && "SUSAN: op1Ty unimplemented cast?\n");
+        //if(op1Ty->isIntegerTy(32))
+        //  Out << "(int)";
+        //else if(op1Ty->isIntegerTy(64))
+        //  Out << "(long long)";
+        //else if(op1Ty->isFloatTy())
+        //  Out << "(float)";
+        //else if(op1Ty->isDoubleTy())
+        //  Out << "(double)";
+        //else assert(0 && "SUSAN: op1Ty unimplemented cast?\n");
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::LShr || opcode == Instruction::AShr){
@@ -8356,7 +8360,19 @@ static const char *getFloatBitCastField(Type *Ty) {
 
 void CWriter::visitCastInst(CastInst &I) {
   CurInstr = &I;
-
+  if(isa<TruncInst>(&I)){
+    writeOperand(I.getOperand(0), ContextCasted);
+    return;
+  }
+  if(isa<SIToFPInst>(&I)){
+    Out << '(';
+    Type *DstTy = I.getType();
+    printTypeName(Out, DstTy);
+    Out << ")(";
+    writeOperand(I.getOperand(0), ContextCasted);
+    Out << ")";
+    return;
+  }
   //skip translating this cast if not needed
   SExtInst *sextinst = dyn_cast<SExtInst>(&I);
   if(sextinst && declareAsCastedType.find(sextinst) != declareAsCastedType.end()){
@@ -8396,6 +8412,7 @@ void CWriter::visitCastInst(CastInst &I) {
   }
 
   Out << '(';
+
   printCast(I.getOpcode(), SrcTy, DstTy);
 
   // Make a sext from i1 work by subtracting the i1 from 0 (an int).
