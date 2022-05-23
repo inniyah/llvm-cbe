@@ -4064,6 +4064,8 @@ void CWriter::generateHeader(Module &M) {
   // Support for integers with explicit sizes. This one isn't conditional
   // because virtually all CBE output will use it.
   OutHeaders << "#include <stdint.h>\n"; // Sized integer support
+  OutHeaders << "#include <stdio.h>\n";
+  OutHeaders << "#include <stdlib.h>\n";
   if (headerIncMath())
     OutHeaders << "#include <math.h>\n";
   // Provide a definition for `bool' if not compiling with a C++ compiler.
@@ -4166,6 +4168,7 @@ void CWriter::generateHeader(Module &M) {
       if (!I->isDeclaration())
         continue;
 
+      if(I->getName() == "stderr") continue;
       if (I->hasDLLImportStorageClass())
         Out << "__declspec(dllimport) ";
       else if (I->hasDLLExportStorageClass())
@@ -4215,6 +4218,11 @@ void CWriter::generateHeader(Module &M) {
      * OpenMP: skip declaring kmpc functions
      */
     if((&*I)->getName().contains("__kmpc")) continue;
+    if((&*I)->getName().contains("free")) continue;
+    if((&*I)->getName().contains("strtol")) continue;
+    if((&*I)->getName().contains("fprintf")) continue;
+    if((&*I)->getName().contains("fputc")) continue;
+    if((&*I)->getName().contains("malloc")) continue;
     // Don't print declarations for intrinsic functions.
     // Store the used intrinsics, which need to be explicitly defined.
     if (I->isIntrinsic()) {
