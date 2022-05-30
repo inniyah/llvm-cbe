@@ -116,11 +116,18 @@ enum UnaryOps {
 
 static bool changeMapValue(
     std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap,
-    std::map<Instruction*, std::map<StringRef, Instruction*>> currMRVar2ValMap){
+    std::map<Instruction*, std::map<StringRef, Instruction*>> currMRVar2ValMap, Function &F){
 
-  return prevMRVar2ValMap.size() == currMRVar2ValMap.size() &&
-     std::equal(prevMRVar2ValMap.begin(), prevMRVar2ValMap.end(),
-                currMRVar2ValMap.begin());
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    auto prev =  prevMRVar2ValMap[&*I];
+    auto curr =  currMRVar2ValMap[&*I];
+    for(auto &[prev_var, prev_val] : prev){
+      if(curr.find(prev_var) == curr.end()) return false;
+      if(curr[prev_var] != prev_val) return false;
+    }
+  }
+
+  return true;
 }
 
 static bool isConstantNull(Value *V) {
@@ -6069,59 +6076,52 @@ void CWriter::printFunction(Function &F) {
   do{
     prevMRVar2ValMap = MRVar2ValMap;
     for (auto &BB : F){
-      bool isFirstInst = true;
       std::map<StringRef, Instruction*> prev_var2val;
       for (auto &I : BB) {
         Instruction *currInst = &I;
+        std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
 
         std::set<StringRef> vars2gen;
         for(auto inst2var : IRNaming)
           if(currInst == inst2var.first)
             vars2gen.insert(inst2var.second);
-        //if(IR2vars.find(currInst) != IR2vars.end())
-        //  vars2gen.insert(IR2vars[currInst].begin(),
-        //                     IR2vars[currInst].end());
-
-
 
         std::map<StringRef, Instruction*> merged_var2val;
         std::map<StringRef, Instruction*> prev_pred_var2val;
-        if(isFirstInst){
+        if(prev_var2val.empty()){
           for (pred_iterator PI = pred_begin(&BB),
                E = pred_end(&BB); PI != E; ++PI){
             BasicBlock *pred = *PI;
             Instruction *term = pred->getTerminator();
             std::map<StringRef, Instruction*> term_var2val = MRVar2ValMap[term];
-            for(auto &var : vars2record){
-              if(prev_pred_var2val.find(var) != prev_pred_var2val.end()
-                 && term_var2val.find(var) != term_var2val.end()
-                 && term_var2val[var] && prev_pred_var2val[var]
-                 && prev_pred_var2val[var] != term_var2val[var]){
-                merged_var2val[var] = nullptr;
-              }
-              else
-                merged_var2val[var] = term_var2val[var];
+            for(auto &[var, val] : term_var2val)
+              if(val)
+                curr_var2val[var] = val;
+
+            if(!prev_pred_var2val.empty()){
+              for(auto &[var, val] : term_var2val)
+                if(prev_pred_var2val[var] != val && val && prev_pred_var2val[var])
+                  curr_var2val[var] = nullptr;
             }
             prev_pred_var2val = term_var2val;
           }
         }
-
-        std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
-        for(auto &var : vars2record){
-          if(vars2gen.find(var) != vars2gen.end())
-             curr_var2val[var] = currInst;
-          else if(merged_var2val.find(var) != merged_var2val.end())
-             curr_var2val[var] = merged_var2val[var];
-          else if(prev_var2val.find(var) != prev_var2val.end())
+        else{
+          for(auto &var : vars2record)
             curr_var2val[var] = prev_var2val[var];
         }
+
+        for(auto &var : vars2record)
+          if(vars2gen.find(var) != vars2gen.end())
+           curr_var2val[var] = currInst;
+
+
         MRVar2ValMap[currInst] = curr_var2val;
         prev_var2val = curr_var2val;
-        isFirstInst = false;
       }
     }
     currMRVar2ValMap = MRVar2ValMap;
-  } while(!changeMapValue(prevMRVar2ValMap, currMRVar2ValMap));
+  } while(!changeMapValue(prevMRVar2ValMap, currMRVar2ValMap, F));
 
   //test the table
   for(auto &[inst, var2val]: MRVar2ValMap){
