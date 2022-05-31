@@ -1538,6 +1538,14 @@ void CWriter::preprocessIVIncrements(){
   }
 }
 
+void CWriter::preprocessInsts2AddParenthesis(Function &F){
+  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
+    if(!isInlinableInst(*I)) continue;
+    if(isa<LoadInst>(&*I)){
+    }
+  }
+}
+
 bool CWriter::runOnFunction(Function &F) {
   static bool findOMPFuncs = false;
   if(!findOMPFuncs)
@@ -6148,8 +6156,10 @@ void CWriter::printFunction(Function &F) {
                 if(var2erase != var){
                   Var2IRs[var2erase].erase(operand);
                   for (auto inst2var : IRNaming)
-                    if(inst2var.first == operand && inst2var.second == var2erase)
+                    if(inst2var.first == operand && inst2var.second == var2erase){
+                      errs() << "SUSAN: removinginst2var at 6152: " << *(inst2var.first) << " -> " << inst2var.second << "\n";
                       instVarPair2Delete.push_back(inst2var);
+                    }
                 }
               }
             }
@@ -6172,16 +6182,22 @@ void CWriter::printFunction(Function &F) {
             if(MRVar2Vals.find(var) != MRVar2Vals.end()
                 && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
                 //Note: if it's IV, we know how to handle it and doesn't need to be deleted
+                //Note: if one of them is alloca, it should be fine
+                if(isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var])) continue;
                 if(!isInductionVariable(operand) && !isIVIncrement(operand)){
                   for(auto pair : IRNaming)
-                    if(pair.first == operand && pair.second == var)
+                    if(pair.first == operand && pair.second == var){
+                      errs() << "SUSAN: removinginst2var at 6180: " << *operand << " -> " << var << "\n";
                       instVarPair2Delete.push_back(pair);
+                    }
                 }
 
                 if(!isInductionVariable(MRVar2Vals[var]) && !isIVIncrement(MRVar2Vals[var])){
                   for(auto pair : IRNaming)
-                    if(pair.first == MRVar2Vals[var] && pair.second == var)
+                    if(pair.first == MRVar2Vals[var] && pair.second == var){
+                      errs() << "SUSAN: removinginst2var at 6188: " << *operand << " -> " << var << "\n";
                       instVarPair2Delete.push_back(pair);
+                    }
                 }
 
             }

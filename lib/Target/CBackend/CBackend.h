@@ -138,6 +138,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<PHINode*, std::set<PHINode*>> IVMap;
   std::map<Instruction*, PHINode*> IVInc2IV;
   std::set<Value*> UpperBoundArgs;
+  std::set<Instruction*> addParenthesis;
 
   CBERegion topRegion;
 
@@ -409,6 +410,7 @@ private:
   Instruction *getIVIncrement(Loop *L, PHINode* IV);
   void preprocessIVIncrements();
   Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset);
+  void preprocessInsts2AddParenthesis(Function &F);
 
 
 
