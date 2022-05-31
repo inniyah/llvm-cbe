@@ -139,6 +139,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::map<Instruction*, PHINode*> IVInc2IV;
   std::set<Value*> UpperBoundArgs;
   std::set<Instruction*> addParenthesis;
+  std::map<Value*, Type*>allocaTypeChange;
 
   CBERegion topRegion;
 

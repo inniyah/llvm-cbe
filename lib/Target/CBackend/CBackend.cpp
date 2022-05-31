@@ -5853,11 +5853,15 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
          break;
        }
 
+     auto type2print = AI->getAllocatedType();
+     if(allocaTypeChange.find(AI) != allocaTypeChange.end())
+       type2print = allocaTypeChange[AI];
+
      if(!printedType){
        if(signedInsts.find(I) != signedInsts.end())
-         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), true);
+         printTypeNameForAddressableValue(Out, type2print, true);
        else
-         printTypeNameForAddressableValue(Out, AI->getAllocatedType(), false);
+         printTypeNameForAddressableValue(Out, type2print, false);
      }
 
      Out << ' ' << varName;
@@ -6183,7 +6187,13 @@ void CWriter::printFunction(Function &F) {
                 && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
                 //Note: if it's IV, we know how to handle it and doesn't need to be deleted
                 //Note: if one of them is alloca, it should be fine
-                if(isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var])) continue;
+                if(isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var])){
+                  if(isa<AllocaInst>(operand) && MRVar2Vals[var])
+                    allocaTypeChange[operand] = MRVar2Vals[var]->getType();
+                  else if(isa<AllocaInst>(MRVar2Vals[var]) && operand)
+                    allocaTypeChange[MRVar2Vals[var]] = operand->getType();
+                  continue;
+                }
                 if(!isInductionVariable(operand) && !isIVIncrement(operand)){
                   for(auto pair : IRNaming)
                     if(pair.first == operand && pair.second == var){
