@@ -1538,10 +1538,50 @@ void CWriter::preprocessIVIncrements(){
   }
 }
 
+bool CWriter::hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOpcodes){
+
+  std::queue<Instruction*> toVisit;
+  std::set<Instruction*> visited;
+  toVisit.push(I);
+  visited.insert(I);
+
+  while(!toVisit.empty()){
+    Instruction *currInst = toVisit.front();
+    toVisit.pop();
+
+    if(!isInlinableInst(*currInst)) break;
+
+    for(auto op : higherOrderOpcodes){
+      if(currInst->getOpcode() == op)
+        return true;
+    }
+
+    for(User *U : currInst->users()){
+      if(Instruction *inst = dyn_cast<Instruction>(U)){
+        if(visited.find(inst) == visited.end()){
+          visited.insert(inst);
+          toVisit.push(inst);
+        }
+      }
+    }
+  }
+  return false;
+}
+
 void CWriter::preprocessInsts2AddParenthesis(Function &F){
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
     if(!isInlinableInst(*I)) continue;
-    if(isa<LoadInst>(&*I)){
+    if(BinaryOperator* binop = dyn_cast<BinaryOperator>(&*I)){
+      auto opcode = binop->getOpcode();
+     if(opcode == Instruction::Add || opcode == Instruction::Sub ||
+         opcode == Instruction::And || opcode == Instruction::Or ||
+         opcode == Instruction::Xor || opcode == Instruction::Shl ||
+         opcode == Instruction::LShr || opcode == Instruction::AShr){
+       std::set<unsigned>higherOrderOpcodes;
+       higherOrderOpcodes.insert({Instruction::Mul, Instruction::FMul, Instruction::SDiv, Instruction::UDiv, Instruction::FDiv, Instruction::URem, Instruction::SRem, Instruction::FRem, Instruction::GetElementPtr});
+       if(hasHigherOrderOps(&*I, higherOrderOpcodes))
+         addParenthesis.insert(binop);
+     }
     }
   }
 }
@@ -8055,11 +8095,13 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
     } else {
       opcode = I.getOpcode();
       if(opcode == Instruction::Add || opcode == Instruction::FAdd){
-        Out << "(";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " + ";
         writeOperand(I.getOperand(1), ContextCasted);
-        Out << ")";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << ")";
       }
       else if(opcode == Instruction::Mul || opcode == Instruction::FMul){
         //Out << "(";
@@ -8139,18 +8181,22 @@ void CWriter::visitBinaryOperator(BinaryOperator &I) {
         writeOperand(I.getOperand(1), ContextCasted);
       }
       else if(opcode == Instruction::LShr || opcode == Instruction::AShr){
-        Out << "(";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " >> ";
         writeOperand(I.getOperand(1), ContextCasted);
-        Out << ")";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << ")";
       }
       else if(opcode == Instruction::Shl){
-        Out << "(";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << "(";
         writeOperand(I.getOperand(0), ContextCasted);
         Out << " << ";
         writeOperand(I.getOperand(1), ContextCasted);
-        Out << ")";
+        if(addParenthesis.find(&I) != addParenthesis.end())
+          Out << ")";
       }
       else if(opcode == Instruction::Xor){
         //Out << "(";

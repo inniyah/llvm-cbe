@@ -412,6 +412,7 @@ private:
   void preprocessIVIncrements();
   Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset);
   void preprocessInsts2AddParenthesis(Function &F);
+  bool hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOpcodes);
 
 
 
