@@ -1576,7 +1576,7 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
     level4operators.insert({Instruction::Add, Instruction::Sub});
     level3operators.insert({Instruction::Mul, Instruction::FMul, Instruction::SDiv, Instruction::UDiv,
                             Instruction::FDiv, Instruction::URem, Instruction::SRem, Instruction::FRem});
-    level2operators.insert({Instruction::FNeg, Instruction::GetElementPtr});
+    level2operators.insert({Instruction::FNeg, Instruction::GetElementPtr, Instruction::Load});
 
     if(!isInlinableInst(*I)) continue;
     if(Instruction* op = dyn_cast<Instruction>(&*I)){
@@ -3390,10 +3390,10 @@ void CWriter::writeOperandInternal(Value *Operand,
   if (Instruction *I = dyn_cast<Instruction>(Operand))
     // Should we inline this instruction to build a tree?
     if (isInlinableInst(*I) && !isDirectAlloca(I)) {
-      if(isa<LoadInst>(I))
+      if(isa<LoadInst>(I) && addParenthesis.find(I) != addParenthesis.end())
         Out << '(';
       writeInstComputationInline(*I, startExpression);
-      if(isa<LoadInst>(I))
+      if(isa<LoadInst>(I) && addParenthesis.find(I) != addParenthesis.end())
         Out << ')';
       return;
     }
