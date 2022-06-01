@@ -1549,12 +1549,13 @@ bool CWriter::hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOp
     Instruction *currInst = toVisit.front();
     toVisit.pop();
 
-    if(!isInlinableInst(*currInst)) break;
-
+    errs() << "currInst :" << *currInst << "\n";
     for(auto op : higherOrderOpcodes){
       if(currInst->getOpcode() == op)
         return true;
     }
+
+    if(!isInlinableInst(*currInst)) break;
 
     for(User *U : currInst->users()){
       if(Instruction *inst = dyn_cast<Instruction>(U)){
@@ -1577,10 +1578,13 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
          opcode == Instruction::And || opcode == Instruction::Or ||
          opcode == Instruction::Xor || opcode == Instruction::Shl ||
          opcode == Instruction::LShr || opcode == Instruction::AShr){
+       errs() << "SUSAN: checking if " << *binop << "needs ()\n";
        std::set<unsigned>higherOrderOpcodes;
        higherOrderOpcodes.insert({Instruction::Mul, Instruction::FMul, Instruction::SDiv, Instruction::UDiv, Instruction::FDiv, Instruction::URem, Instruction::SRem, Instruction::FRem, Instruction::GetElementPtr});
-       if(hasHigherOrderOps(&*I, higherOrderOpcodes))
+       if(hasHigherOrderOps(&*I, higherOrderOpcodes)){
+         errs() << "SUSAN: add () to inst: " << *binop << "\n";
          addParenthesis.insert(binop);
+       }
      }
     }
   }
@@ -1659,6 +1663,7 @@ bool CWriter::runOnFunction(Function &F) {
    EliminateDeadInsts(F);
    FindInductionVariableRelationships();
    preprocessIVIncrements();
+   preprocessInsts2AddParenthesis(F);
    printFunction(F);
 
   LI = nullptr;
