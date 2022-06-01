@@ -8461,13 +8461,23 @@ static const char *getFloatBitCastField(Type *Ty) {
 
 void CWriter::visitCastInst(CastInst &I) {
   CurInstr = &I;
+  Type *DstTy = I.getType();
+  Type *SrcTy = I.getOperand(0)->getType();
   if(isa<TruncInst>(&I)){
     writeOperand(I.getOperand(0), ContextCasted);
     return;
   }
+  if(isa<ZExtInst>(&I) && isa<IntegerType>(DstTy) && isa<IntegerType>(SrcTy)){
+    unsigned dstBits = cast<IntegerType>(DstTy)->getBitWidth();
+    unsigned srcBits = cast<IntegerType>(SrcTy)->getBitWidth();
+
+    if(srcBits <= 32 && dstBits <= 64){
+      writeOperand(I.getOperand(0), ContextCasted);
+      return;
+    }
+  }
   if(isa<SIToFPInst>(&I)){
     Out << '(';
-    Type *DstTy = I.getType();
     printTypeName(Out, DstTy);
     Out << ")(";
     writeOperand(I.getOperand(0), ContextCasted);
@@ -8480,9 +8490,6 @@ void CWriter::visitCastInst(CastInst &I) {
       writeOperand(I.getOperand(0));
       return;
   }
-
-  Type *DstTy = I.getType();
-  Type *SrcTy = I.getOperand(0)->getType();
 
   if (DstTy->isVectorTy() || SrcTy->isVectorTy() ||
       DstTy->getPrimitiveSizeInBits() > 64 ||
