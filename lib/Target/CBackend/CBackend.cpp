@@ -1571,21 +1571,35 @@ bool CWriter::hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOp
 
 void CWriter::preprocessInsts2AddParenthesis(Function &F){
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
+    std::set<unsigned>level5operators, level4operators, level3operators, level2operators;
+    level5operators.insert({Instruction::Shl, Instruction::LShr, Instruction::AShr});
+    level4operators.insert({Instruction::Add, Instruction::Sub});
+    level3operators.insert({Instruction::Mul, Instruction::FMul, Instruction::SDiv, Instruction::UDiv,
+                            Instruction::FDiv, Instruction::URem, Instruction::SRem, Instruction::FRem});
+    level2operators.insert({Instruction::FNeg, Instruction::GetElementPtr});
+
     if(!isInlinableInst(*I)) continue;
-    if(BinaryOperator* binop = dyn_cast<BinaryOperator>(&*I)){
-      auto opcode = binop->getOpcode();
-     if(opcode == Instruction::Add || opcode == Instruction::Sub ||
-         opcode == Instruction::And || opcode == Instruction::Or ||
-         opcode == Instruction::Xor || opcode == Instruction::Shl ||
-         opcode == Instruction::LShr || opcode == Instruction::AShr){
-       errs() << "SUSAN: checking if " << *binop << "needs ()\n";
-       std::set<unsigned>higherOrderOpcodes;
-       higherOrderOpcodes.insert({Instruction::Mul, Instruction::FMul, Instruction::SDiv, Instruction::UDiv, Instruction::FDiv, Instruction::URem, Instruction::SRem, Instruction::FRem, Instruction::GetElementPtr});
-       if(hasHigherOrderOps(&*I, higherOrderOpcodes)){
-         errs() << "SUSAN: add () to inst: " << *binop << "\n";
-         addParenthesis.insert(binop);
-       }
-     }
+    if(Instruction* op = dyn_cast<Instruction>(&*I)){
+      auto opcode = op->getOpcode();
+      std::set<unsigned>higherOrderOpcodes;
+      if(level3operators.find(opcode) != level3operators.end()){
+        higherOrderOpcodes.insert(level2operators.begin(), level2operators.end());
+      }
+      else if(level4operators.find(opcode) != level4operators.end()){
+        higherOrderOpcodes.insert(level2operators.begin(), level2operators.end());
+        higherOrderOpcodes.insert(level3operators.begin(), level3operators.end());
+      }
+      else if(level5operators.find(opcode) != level5operators.end()){
+        higherOrderOpcodes.insert(level2operators.begin(), level2operators.end());
+        higherOrderOpcodes.insert(level3operators.begin(), level3operators.end());
+        higherOrderOpcodes.insert(level4operators.begin(), level4operators.end());
+      }
+
+
+      if(hasHigherOrderOps(&*I, higherOrderOpcodes)){
+        errs() << "SUSAN: add () to inst: " << *op << "\n";
+        addParenthesis.insert(op);
+      }
     }
   }
 }
