@@ -86,21 +86,14 @@ public:
 class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 
   // SUSAN: tables for variable preservation
-  //most recent variable to value map
-  std::map<Instruction*, std::map<StringRef, Instruction*>> MRVar2ValMap;
-  std::map<StringRef,std::set<Instruction*>>Var2IRs;
-  std::map<Instruction*, std::set<StringRef>>IR2vars;
-
   std::set<std::pair<Instruction*, StringRef>> IRNaming;
-
   std::set<StringRef>allVars, phiVars;
   //std::set<BasicBlock*>printedBBs;
   std::map<BasicBlock*, int> times2bePrinted;
-  std::set<BasicBlock*> splittedBBs;
-  std::set<Instruction*> declaredInsts;
+  //std::set<BasicBlock*> splittedBBs;
+  //std::set<Instruction*> declaredInsts;
   std::set<std::pair<BasicBlock*, BasicBlock*>> irregularLoopExits;
   std::vector<Instruction*> ifBranches;
-  std::set<Type*> printedTypeNames;
   std::set<GetElementPtrInst*> accessGEPMemory;
   std::set<GetElementPtrInst*> GEPPointers;
   std::set<GetElementPtrInst*> NoneArrayGEPs;
@@ -116,7 +109,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   bool NATURAL_CONTROL_FLOW;
   std::set<Instruction*> signedInsts;
   std::map<SExtInst*, Instruction*> declareAsCastedType;
-  std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
+  //std::set<std::pair<BasicBlock*, PHINode*>> printedPHIValues;
   std::set<std::pair<BasicBlock*, PHINode*>> PHIValues2Print;
   std::map<CallInst*, Function*> ompFuncs;
   std::set<Value*> omp_SkipVals;
@@ -124,7 +117,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
   std::set<LoopProfile*> LoopProfiles;
   std::set<GetElementPtrInst*> GEPNeedsReference;
   //std::set<Value*>skipInstsForPhis;
-  std::map<PHINode*, std::set<Value*>>phis2print;
+  //std::map<PHINode*, std::set<Value*>>phis2print;
   std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
   std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
@@ -413,7 +406,7 @@ private:
   Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset);
   void preprocessInsts2AddParenthesis(Function &F);
   bool hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOpcodes);
-
+  void RunAllAnalysis(Function &F);
 
 
   void writeOperandDeref(Value *Operand);

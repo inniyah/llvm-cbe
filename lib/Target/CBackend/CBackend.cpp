@@ -1630,9 +1630,7 @@ bool CWriter::runOnFunction(Function &F) {
   SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
 
 
-  //RI->dump();
-  // Get rid of intrinsics we can't handle.
-  bool Modified = lowerIntrinsics(F);
+
 
   /*
    * OpenMP: preprosessings
@@ -1669,15 +1667,17 @@ bool CWriter::runOnFunction(Function &F) {
   collectNoneArrayGEPs(F);
   collectVariables2Deref(F);
 
-  // Output all floating point constants that cannot be printed accurately.
-  printFloatingPointConstants(F);
-
-
 
    EliminateDeadInsts(F);
    FindInductionVariableRelationships();
    preprocessIVIncrements();
    preprocessInsts2AddParenthesis(F);
+
+  //RI->dump();
+  // Get rid of intrinsics we can't handle.
+  bool Modified = lowerIntrinsics(F);
+  // Output all floating point constants that cannot be printed accurately.
+  printFloatingPointConstants(F);
    printFunction(F);
 
   LI = nullptr;
@@ -5876,22 +5876,22 @@ void CWriter::findSignedInsts(Instruction* inst, Instruction* signedInst){
 
 }
 
-void CWriter::insertDeclaredInsts(Instruction* I){
-  // all the insts associated with this variable counts as declared
-  // Shouldn't need this code here but in case there exists empty phi
-  std::set<StringRef> declareVars;
-  for(auto inst2var : IRNaming)
-    if(inst2var.first == I)
-      declareVars.insert(inst2var.second);
-
-  for(auto var : declareVars)
-    for(auto inst2var : IRNaming)
-      if(inst2var.second == var)
-        declaredInsts.insert(inst2var.first);
-
-  if(declareVars.empty())
-    declaredInsts.insert(I);
-}
+///void CWriter::insertDeclaredInsts(Instruction* I){
+///  // all the insts associated with this variable counts as declared
+///  // Shouldn't need this code here but in case there exists empty phi
+///  std::set<StringRef> declareVars;
+///  for(auto inst2var : IRNaming)
+///    if(inst2var.first == I)
+///      declareVars.insert(inst2var.second);
+///
+///  for(auto var : declareVars)
+///    for(auto inst2var : IRNaming)
+///      if(inst2var.second == var)
+///        declaredInsts.insert(inst2var.first);
+///
+///  if(declareVars.empty())
+///    declaredInsts.insert(I);
+///}
 
 void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDeclared,
                                    std::set<std::string> &declaredLocals){
@@ -5977,7 +5977,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
 
        Out << ";\n";
 
-       insertDeclaredInsts(I);
+       //insertDeclaredInsts(I);
 
      }
 
@@ -6084,6 +6084,8 @@ void CWriter::printFunction(Function &F) {
   bool PrintedVar = false;
 
   //SUSAN: build a variable - IR table
+  std::map<Instruction*, std::set<StringRef>>IR2vars;
+  std::map<StringRef,std::set<Instruction*>>Var2IRs;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *F = CI->getCalledFunction()){
@@ -6129,6 +6131,7 @@ void CWriter::printFunction(Function &F) {
     errs() << *inst2var.first << " -> " << inst2var.second << "\n";
   }
 
+  std::map<Instruction*, std::map<StringRef, Instruction*>> MRVar2ValMap;
   std::set<StringRef> vars2record;
   for(auto inst2var : IRNaming){
     vars2record.insert(inst2var.second);
@@ -7455,7 +7458,7 @@ void CWriter::printPHICopiesForAllPhis(BasicBlock *CurBlock,
         for (BasicBlock::iterator I = succBB->begin(); isa<PHINode>(I); ++I) {
           PHINode *PN = cast<PHINode>(I);
           if(PN->getBasicBlockIndex(CurBlock) >= 0 && !alreadyPrintedPHIVal(CurBlock, PN)){
-            printedPHIValues.insert(std::make_pair(CurBlock, PN));
+            //printedPHIValues.insert(std::make_pair(CurBlock, PN));
             // Now we have to do the printing.
             Value *IV = PN->getIncomingValueForBlock(CurBlock);
             if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType())) {
@@ -7480,7 +7483,7 @@ void CWriter::printPHICopiesForSuccessor(BasicBlock *CurBlock,
     PHINode *PN = cast<PHINode>(I);
     Value *IV = PN->getIncomingValueForBlock(CurBlock);
     if (!isa<UndefValue>(IV) && !isEmptyType(IV->getType()) && !alreadyPrintedPHIVal(CurBlock, PN)) {
-      printedPHIValues.insert(std::make_pair(CurBlock, PN));
+      //printedPHIValues.insert(std::make_pair(CurBlock, PN));
 
       Out << " " << GetValueName(PN) << " = ";
       writeOperandInternal(IV);
@@ -8947,6 +8950,14 @@ void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function
   }
 }
 
+void CWriter::RunAllAnalysis(Function &F){
+  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+  RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
+  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+}
+
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
 
@@ -8973,6 +8984,64 @@ void CWriter::visitCallInst(CallInst &I) {
         printComma = true;
       }
       Out << ");\n";
+
+      //directly inline omp_outlined function
+      //1. save all the data that current function has
+      auto IS_OPENMP_FUNCTION_SAVE = IS_OPENMP_FUNCTION;
+      auto LI_s = LI;
+      auto PDT_s = PDT;
+      auto DT_s = DT;
+      auto RI_s = RI;
+      auto SE_s = SE;
+      auto LoopProfiles_s = LoopProfiles;
+      auto omp_declaredLocals_s = omp_declaredLocals;
+      auto omp_liveins_s = omp_liveins;
+      auto omp_SkipVals_s = omp_SkipVals;
+      auto deleteAndReplaceInsts_s = deleteAndReplaceInsts;
+      auto deadBranches_s = deadBranches;
+      auto ifBranches_s = ifBranches;
+      auto backEdges_s = backEdges;
+      auto topRegion_s = topRegion;
+      auto times2bePrinted_s = times2bePrinted;
+      auto returnDominated_s = returnDominated;
+      auto irregularLoopExits_s = irregularLoopExits;
+      auto gotoBranches_s = gotoBranches;
+      auto PHIValues2Print_s = PHIValues2Print;
+      auto InstsToReplaceByPhi_s = InstsToReplaceByPhi;
+      auto NoneArrayGEPs_s = NoneArrayGEPs;
+      auto Times2Dereference_s = Times2Dereference;
+      auto deadInsts_s = deadInsts;
+      auto IVMap_s = IVMap;
+      auto addParenthesis_s = addParenthesis;
+      auto phiVars_s = phiVars;
+      auto allVars_s = allVars;
+      auto accessGEPMemory_s = accessGEPMemory;
+      auto GEPPointers_s = GEPPointers;
+      auto currValue2DerefCnt_s = currValue2DerefCnt;
+      auto printLabels_s = printLabels;
+      auto loopCondCalls_s = loopCondCalls;
+      auto CBERegionMap_s = CBERegionMap;
+      auto recordedRegionBBs_s = recordedRegionBBs;
+      auto gepStart_s = gepStart;
+      auto NATURAL_CONTROL_FLOW_S = NATURAL_CONTROL_FLOW;
+      auto signedInsts_s = signedInsts;
+      auto declareAsCastedType_s = declareAsCastedType;
+      auto ompFuncs_s = ompFuncs;
+      auto GEPNeedsReference_s = GEPNeedsReference;
+      auto omp_declarePrivate_s = omp_declarePrivate;
+      auto IVInc2IV_s = IVInc2IV;
+      auto UpperBoundArgs_s = UpperBoundArgs;
+      auto allocaTypeChange_s = allocaTypeChange;
+
+      //inline the function
+
+
+      //recover data for current function
+      IS_OPENMP_FUNCTION = false;
+      for(auto [call, utask] : ompFuncs)
+        if(utask == I.getParent()->getParent())
+          IS_OPENMP_FUNCTION = true;
+
       return;
   }
 
