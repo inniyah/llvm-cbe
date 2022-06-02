@@ -1622,60 +1622,8 @@ bool CWriter::runOnFunction(Function &F) {
   if (F.hasAvailableExternallyLinkage())
     return false;
 
-  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  // SUSAN: add post dominator, dominator & region info
-  PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
-  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  bool Modified = RunAllAnalysis(F);
 
-
-
-
-  /*
-   * OpenMP: preprosessings
-   */
-  LoopProfiles.clear();
-  omp_declaredLocals.clear();
-  omp_liveins.clear();
-  if(IS_OPENMP_FUNCTION)
-   omp_preprossesing(F);
-  preprocessSkippableInsts(F);
-  preprocessLoopProfiles(F);
-  deadBranches.clear();
-  preprocessSkippableBranches(F);
-  PDT->recalculate(F);
-  DT->recalculate(F);
-  //SUSAN: determine whether the function can be compiled without gotos
-  std::set<BasicBlock*> visitedBBs;
-  markIfBranches(F, &visitedBBs); //2
-  markBackEdges(F);
-  determineControlFlowTranslationMethod(F);
-
-  //SUSAN: preprocessings
-  //1. mark all the irregular exits of a loop (break/return)
-  //2. find all the branches that can be expressed as if statement before split
-  //3. node splitting on irregular graph
-  //4. identify branches that can be expressed as if statement after split
-  //5. mark each basicblock its number of times to be printed
-
-  markLoopIrregularExits(F); //1
-  markGotoBranches(F);
-  preprossesPHIs2Print(F);
-  //NodeSplitting(F); PDT->recalculate(F); //3
-  //markIfBranches(F, &visitedBBs); //4
-  collectNoneArrayGEPs(F);
-  collectVariables2Deref(F);
-
-
-   EliminateDeadInsts(F);
-   FindInductionVariableRelationships();
-   preprocessIVIncrements();
-   preprocessInsts2AddParenthesis(F);
-
-  //RI->dump();
-  // Get rid of intrinsics we can't handle.
-  bool Modified = lowerIntrinsics(F);
   // Output all floating point constants that cannot be printed accurately.
   printFloatingPointConstants(F);
    printFunction(F);
@@ -8950,12 +8898,59 @@ void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function
   }
 }
 
-void CWriter::RunAllAnalysis(Function &F){
+bool CWriter::RunAllAnalysis(Function &F){
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
   SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  //RI->dump();
+  // Get rid of intrinsics we can't handle.
+  bool Modified = lowerIntrinsics(F);
+
+
+  /*
+   * OpenMP: preprosessings
+   */
+  LoopProfiles.clear();
+  omp_declaredLocals.clear();
+  omp_liveins.clear();
+  if(IS_OPENMP_FUNCTION)
+   omp_preprossesing(F);
+  preprocessSkippableInsts(F);
+  preprocessLoopProfiles(F);
+  deadBranches.clear();
+  preprocessSkippableBranches(F);
+  PDT->recalculate(F);
+  DT->recalculate(F);
+  //SUSAN: determine whether the function can be compiled without gotos
+  std::set<BasicBlock*> visitedBBs;
+  markIfBranches(F, &visitedBBs); //2
+  markBackEdges(F);
+  determineControlFlowTranslationMethod(F);
+
+  //SUSAN: preprocessings
+  //1. mark all the irregular exits of a loop (break/return)
+  //2. find all the branches that can be expressed as if statement before split
+  //3. node splitting on irregular graph
+  //4. identify branches that can be expressed as if statement after split
+  //5. mark each basicblock its number of times to be printed
+
+  markLoopIrregularExits(F); //1
+  markGotoBranches(F);
+  preprossesPHIs2Print(F);
+  //NodeSplitting(F); PDT->recalculate(F); //3
+  //markIfBranches(F, &visitedBBs); //4
+  collectNoneArrayGEPs(F);
+  collectVariables2Deref(F);
+
+
+   EliminateDeadInsts(F);
+   FindInductionVariableRelationships();
+   preprocessIVIncrements();
+   preprocessInsts2AddParenthesis(F);
+
+   return Modified;
 }
 
 void CWriter::visitCallInst(CallInst &I) {

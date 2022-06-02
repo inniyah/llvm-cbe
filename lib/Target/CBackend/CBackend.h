@@ -406,7 +406,7 @@ private:
   Value* findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallInst *prevFini, int &offset);
   void preprocessInsts2AddParenthesis(Function &F);
   bool hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOpcodes);
-  void RunAllAnalysis(Function &F);
+  bool RunAllAnalysis(Function &F);
 
 
   void writeOperandDeref(Value *Operand);
