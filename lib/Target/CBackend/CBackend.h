@@ -83,7 +83,7 @@ public:
 
 /// CWriter - This class is the main chunk of code that converts an LLVM
 /// module to a C translation unit.
-class CWriter : public FunctionPass, public InstVisitor<CWriter> {
+class CWriter : public ModulePass, public InstVisitor<CWriter> {
 
   // SUSAN: tables for variable preservation
   std::set<std::pair<Instruction*, StringRef>> IRNaming;
@@ -257,7 +257,7 @@ class CWriter : public FunctionPass, public InstVisitor<CWriter> {
 public:
   static char ID;
   explicit CWriter(raw_ostream &o)
-      : FunctionPass(ID), OutHeaders(_OutHeaders), Out(_Out), FileOut(o) {
+      : ModulePass(ID), OutHeaders(_OutHeaders), Out(_Out), FileOut(o) {
     memset(&UsedHeaders, 0, sizeof(UsedHeaders));
   }
 
@@ -274,7 +274,8 @@ public:
 
   virtual bool doInitialization(Module &M);
   virtual bool doFinalization(Module &M);
-  virtual bool runOnFunction(Function &F);
+  //virtual bool runOnFunction(Function &F);
+  virtual bool runOnModule(Module &M);
 
 private:
   void generateHeader(Module &M);

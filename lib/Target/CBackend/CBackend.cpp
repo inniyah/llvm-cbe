@@ -1604,33 +1604,39 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
   }
 }
 
-bool CWriter::runOnFunction(Function &F) {
-  static bool findOMPFuncs = false;
-  if(!findOMPFuncs)
-    findOMPFunctions(*(F.getParent()));
-  findOMPFuncs = true;
+bool CWriter::runOnModule(Module &M) {
+  bool Modified = false;
+  for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI) {
+    Function *F = &*FI;
+    if(F->isIntrinsic()) continue;
+    if(F->isDeclaration()) continue;
+    errs() << "SUSAN: function: " << *F << "\n";
+    static bool findOMPFuncs = false;
+    if(!findOMPFuncs)
+      findOMPFunctions(*(F->getParent()));
+    findOMPFuncs = true;
 
-  IS_OPENMP_FUNCTION = false;
-  for(auto [call, utask] : ompFuncs){
-    errs() << "OMP FUNC: " << *utask << "\n";
-    if(utask == &F)
-      IS_OPENMP_FUNCTION = true;
+    IS_OPENMP_FUNCTION = false;
+    for(auto [call, utask] : ompFuncs){
+      errs() << "OMP FUNC: " << *utask << "\n";
+      if(utask == F)
+        IS_OPENMP_FUNCTION = true;
+    }
+
+    // Do not codegen any 'available_externally' functions at all, they have
+    // definitions outside the translation unit.
+    if (F->hasAvailableExternallyLinkage())
+      return false;
+
+    Modified |= RunAllAnalysis(*F);
+
+    // Output all floating point constants that cannot be printed accurately.
+    printFloatingPointConstants(*F);
+     printFunction(*F);
+
+    LI = nullptr;
+    PDT = nullptr;
   }
-
-  // Do not codegen any 'available_externally' functions at all, they have
-  // definitions outside the translation unit.
-  if (F.hasAvailableExternallyLinkage())
-    return false;
-
-  bool Modified = RunAllAnalysis(F);
-
-  // Output all floating point constants that cannot be printed accurately.
-  printFloatingPointConstants(F);
-   printFunction(F);
-
-  LI = nullptr;
-  PDT = nullptr;
-
   return Modified;
 }
 
@@ -8899,11 +8905,11 @@ void CWriter::omp_searchForUsesToDelete(std::set<Value*> values2delete, Function
 }
 
 bool CWriter::RunAllAnalysis(Function &F){
-  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
-  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  LI = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
+  PDT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
+  DT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
+  RI = &getAnalysis<RegionInfoPass>(F).getRegionInfo();
+  SE = &getAnalysis<ScalarEvolutionWrapperPass>(F).getSE();
   //RI->dump();
   // Get rid of intrinsics we can't handle.
   bool Modified = lowerIntrinsics(F);
