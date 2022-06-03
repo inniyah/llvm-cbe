@@ -134,7 +134,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<Instruction*> addParenthesis;
   std::map<Value*, Type*>allocaTypeChange;
 
-  CBERegion topRegion;
+  CBERegion *topRegion;
 
   // SUSAN: added analyses
   PostDominatorTree *PDT = nullptr;

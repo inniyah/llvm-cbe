@@ -286,7 +286,7 @@ bool directPathFromAtoBwithoutC(BasicBlock *fromBB, BasicBlock *toBB, BasicBlock
 
 CBERegion* CWriter::findRegionOfBlock(BasicBlock* BB){
   std::queue<CBERegion*> toVisit;
-  toVisit.push(&topRegion);
+  toVisit.push(topRegion);
   while(!toVisit.empty()){
     CBERegion *currNode = toVisit.front();
     toVisit.pop();
@@ -316,7 +316,7 @@ bool CWriter::alreadyVisitedRegion (BasicBlock* bbUT){
 void CWriter::CountTimes2bePrintedByRegionPath(){
   std::stack<CBERegion*> toVisit;
 
-  toVisit.push(&topRegion);
+  toVisit.push(topRegion);
 
   while(!toVisit.empty()){
     CBERegion *currRegion = toVisit.top();
@@ -347,7 +347,7 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
     //}
 
     for(auto bb : currRegion->thenBBs){
-      if(returnDominated && currRegion == &topRegion
+      if(returnDominated && currRegion == topRegion
           && isa<ReturnInst>(bb->getTerminator())){
         errs() << "SUSAN: found duplicated then return BB\n";
         continue;
@@ -355,7 +355,7 @@ void CWriter::CountTimes2bePrintedByRegionPath(){
       times2bePrinted[bb]++;
     }
     for(auto bb : currRegion->elseBBs){
-      if(returnDominated && currRegion == &topRegion
+      if(returnDominated && currRegion == topRegion
           && isa<ReturnInst>(bb->getTerminator())){
         errs() << "SUSAN: found duplicated else return BB\n";
         continue;
@@ -509,15 +509,16 @@ void CWriter::markBranchRegion(Instruction* br, CBERegion* targetRegion){
 void CWriter::markBBwithNumOfVisits(Function &F){
 
   //set up top region
-  topRegion.entryBlock = nullptr;
-  topRegion.parentRegion = nullptr;
+  topRegion = new CBERegion();
+  topRegion->entryBlock = nullptr;
+  topRegion->parentRegion = nullptr;
   for(auto &BB : F){
    // topRegion.thenBBs.push_back(&BB);
     times2bePrinted[&BB]=0;
   }
 
   returnDominated = false;
-  recordTimes2bePrintedForBranch(&F.getEntryBlock(), nullptr, nullptr, &topRegion);
+  recordTimes2bePrintedForBranch(&F.getEntryBlock(), nullptr, nullptr, topRegion);
 
   //despite root node, each leaf-to-child_of_root path will contain a set of BBs, these BBs times3bePrinted need to be incrememnted, lastly any node with times2bePrinted = 0 means it belong to the entry node and therefore times2bePrinted = 1
   std::vector<CBERegion*> regionPath;
@@ -527,7 +528,7 @@ void CWriter::markBBwithNumOfVisits(Function &F){
   //record times2bePrinted
   //record RegionMap
   std::queue<CBERegion*> toVisit;
-  toVisit.push(&topRegion);
+  toVisit.push(topRegion);
   while(!toVisit.empty()){
     CBERegion *currNode = toVisit.front();
     toVisit.pop();
@@ -746,7 +747,7 @@ void CWriter::markBackEdges(Function &F){
 std::set<BasicBlock*> CWriter::findRegionEntriesOfBB (BasicBlock* BB){
    std::set<BasicBlock*> entries;
    std::queue<CBERegion*> toVisit;
-   toVisit.push(&topRegion);
+   toVisit.push(topRegion);
 
    while(!toVisit.empty()){
      CBERegion *currNode = toVisit.front();
@@ -8973,7 +8974,7 @@ void CWriter::visitCallInst(CallInst &I) {
       Out << "  #pragma omp parallel \n" << "\n";
       // Create a Call to omp_outlined
       auto utask = ompFuncs[&I];
-      Out << "  " << GetValueName(utask) << "(";
+      /*Out << "  " << GetValueName(utask) << "(";
 
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
       bool printComma = false;
@@ -8985,15 +8986,10 @@ void CWriter::visitCallInst(CallInst &I) {
         printComma = true;
       }
       Out << ");\n";
-
+      */
       //directly inline omp_outlined function
       //1. save all the data that current function has
       auto IS_OPENMP_FUNCTION_SAVE = IS_OPENMP_FUNCTION;
-      auto LI_s = LI;
-      auto PDT_s = PDT;
-      auto DT_s = DT;
-      auto RI_s = RI;
-      auto SE_s = SE;
       auto LoopProfiles_s = LoopProfiles;
       auto omp_declaredLocals_s = omp_declaredLocals;
       auto omp_liveins_s = omp_liveins;
@@ -9033,8 +9029,16 @@ void CWriter::visitCallInst(CallInst &I) {
       auto IVInc2IV_s = IVInc2IV;
       auto UpperBoundArgs_s = UpperBoundArgs;
       auto allocaTypeChange_s = allocaTypeChange;
+      auto IRNaming_s = IRNaming;
+      auto CurLoop_s = CurLoop;
+      auto CurInstr_s = CurInstr;
 
       //inline the function
+      IS_OPENMP_FUNCTION = true;
+      RunAllAnalysis(*utask);
+      // Output all floating point constants that cannot be printed accurately.
+      printFloatingPointConstants(*utask);
+      printFunction(*utask);
 
 
       //recover data for current function
@@ -9042,6 +9046,56 @@ void CWriter::visitCallInst(CallInst &I) {
       for(auto [call, utask] : ompFuncs)
         if(utask == I.getParent()->getParent())
           IS_OPENMP_FUNCTION = true;
+
+      IS_OPENMP_FUNCTION = IS_OPENMP_FUNCTION_SAVE;
+      LoopProfiles = LoopProfiles_s;
+      omp_declaredLocals = omp_declaredLocals_s;
+      omp_liveins = omp_liveins_s;
+      omp_SkipVals = omp_SkipVals_s;
+      deleteAndReplaceInsts = deleteAndReplaceInsts_s;
+      deadBranches = deadBranches_s;
+      ifBranches = ifBranches_s;
+      backEdges = backEdges_s;
+      topRegion = topRegion_s;
+      times2bePrinted = times2bePrinted_s;
+      returnDominated = returnDominated_s;
+      irregularLoopExits = irregularLoopExits_s;
+      gotoBranches = gotoBranches_s;
+      PHIValues2Print = PHIValues2Print_s;
+      InstsToReplaceByPhi = InstsToReplaceByPhi_s;
+      NoneArrayGEPs = NoneArrayGEPs_s;
+      Times2Dereference = Times2Dereference_s;
+      deadInsts = deadInsts_s;
+      IVMap = IVMap_s;
+      addParenthesis = addParenthesis_s;
+      phiVars = phiVars_s;
+      allVars = allVars_s;
+      accessGEPMemory = accessGEPMemory_s;
+      GEPPointers = GEPPointers_s;
+      currValue2DerefCnt = currValue2DerefCnt_s;
+      printLabels = printLabels_s;
+      loopCondCalls = loopCondCalls_s;
+      CBERegionMap = CBERegionMap_s;
+      recordedRegionBBs = recordedRegionBBs_s;
+      gepStart = gepStart_s;
+      NATURAL_CONTROL_FLOW = NATURAL_CONTROL_FLOW_S;
+      signedInsts = signedInsts_s;
+      declareAsCastedType = declareAsCastedType_s;
+      ompFuncs = ompFuncs_s;
+      GEPNeedsReference = GEPNeedsReference_s;
+      omp_declarePrivate = omp_declarePrivate_s;
+      IVInc2IV = IVInc2IV_s;
+      UpperBoundArgs = UpperBoundArgs_s;
+      allocaTypeChange = allocaTypeChange_s;
+      IRNaming = IRNaming_s;
+      CurLoop = CurLoop_s;
+      CurInstr = CurInstr_s;
+      Function* F = I.getParent()->getParent();
+      LI = &getAnalysis<LoopInfoWrapperPass>(*F).getLoopInfo();
+      PDT = &getAnalysis<PostDominatorTreeWrapperPass>(*F).getPostDomTree();
+      DT = &getAnalysis<DominatorTreeWrapperPass>(*F).getDomTree();
+      RI = &getAnalysis<RegionInfoPass>(*F).getRegionInfo();
+      SE = &getAnalysis<ScalarEvolutionWrapperPass>(*F).getSE();
 
       return;
   }
