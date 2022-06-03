@@ -1378,6 +1378,58 @@ void CWriter::preprocessSkippableInsts(Function &F){
 }
 
 void CWriter::EliminateDeadInsts(Function &F){
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    Instruction *inst = &*I;
+    if(CallInst *CI = dyn_cast<CallInst>(inst)){
+      errs() << "SUSAN: CI at 1400: " << *CI << "\n";
+      if(Function *F = CI->getCalledFunction()){
+        if(F->getName() == "malloc"){
+          errs() << "SUSAN: found malloc 1403: " << *inst << "\n";
+          for (User *U : inst->users())
+            if(isa<StoreInst>(U)){
+              errs() << "SUSAN: found storeinst 1404: " << *U << "\n";
+              deadInsts.insert(cast<Instruction>(U));
+            }
+        } else if (F->getName() == "strtol"){
+          for (User *U : inst->users())
+            if(isa<TruncInst>(U)){
+              TruncInst* trunc = cast<TruncInst>(U);
+              for (User *truncU : trunc->users())
+                if(isa<StoreInst>(truncU))
+                  deadInsts.insert(cast<Instruction>(truncU));
+            }
+        }
+      }
+    }
+
+    if(inst->getName().contains("kmpc_loc")){
+      errs() << "SUSAN: kmpc_loc found!!!\n";
+      deadInsts.insert(inst);
+
+      std::set<Instruction*> visited;
+      std::queue<Instruction*> toVisit;
+      visited.insert(inst);
+      toVisit.push(inst);
+      deadInsts.insert(inst);
+
+      while(!toVisit.empty()){
+        Instruction *currInst = toVisit.front();
+        toVisit.pop();
+
+        for(User *U : currInst->users()){
+          Instruction *userInst = dyn_cast<Instruction>(U);
+          if(userInst && visited.find(userInst) ==visited.end() ){
+            visited.insert(userInst);
+            toVisit.push(userInst);
+            CallInst* CI = dyn_cast<CallInst>(userInst);
+            if(CI && ompFuncs.find(CI) != ompFuncs.end()) continue;
+            deadInsts.insert(userInst);
+          }
+        }
+      }
+      continue;
+    }
+  }
   //first record all the liveins for openmp functions
   //any instructions that's not in an omp loop or not an livein should be eliminated
   if(IS_OPENMP_FUNCTION){
@@ -1395,32 +1447,8 @@ void CWriter::EliminateDeadInsts(Function &F){
 
     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
       Instruction *inst = &*I;
-      if(inst->getName().contains("kmpc_loc")){
-        errs() << "SUSAN: kmpc_loc found!!!\n";
-        deadInsts.insert(inst);
 
-        std::set<Instruction*> visited;
-        std::queue<Instruction*> toVisit;
-        visited.insert(inst);
-        toVisit.push(inst);
-        deadInsts.insert(inst);
 
-        while(!toVisit.empty()){
-          Instruction *currInst = toVisit.front();
-          toVisit.pop();
-
-          for(User *U : currInst->users()){
-            Instruction *userInst = dyn_cast<Instruction>(U);
-            if(userInst && visited.find(userInst) ==visited.end() ){
-              errs() << "SUSAN: deadInst from kmpc_loc: " << *userInst << "\n";
-              visited.insert(userInst);
-              toVisit.push(userInst);
-              deadInsts.insert(userInst);
-            }
-          }
-        }
-        continue;
-      }
 
 
       bool isLoopLiveIn = false;
@@ -1607,15 +1635,11 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
 
 bool CWriter::runOnModule(Module &M) {
   bool Modified = false;
+  findOMPFunctions(M);
   for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI) {
     Function *F = &*FI;
     if(F->isIntrinsic()) continue;
     if(F->isDeclaration()) continue;
-    errs() << "SUSAN: function: " << *F << "\n";
-    static bool findOMPFuncs = false;
-    if(!findOMPFuncs)
-      findOMPFunctions(*(F->getParent()));
-    findOMPFuncs = true;
 
     IS_OPENMP_FUNCTION = false;
     for(auto [call, utask] : ompFuncs){
@@ -1623,6 +1647,7 @@ bool CWriter::runOnModule(Module &M) {
       if(utask == F)
         IS_OPENMP_FUNCTION = true;
     }
+    if(IS_OPENMP_FUNCTION) continue;
 
     // Do not codegen any 'available_externally' functions at all, they have
     // definitions outside the translation unit.
@@ -3193,6 +3218,10 @@ std::string CWriter::GetValueName(Value *Operand) {
   //SUSAN: variable names associated with phi will be replaced by phi
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
     return GetValueName(InstsToReplaceByPhi[Operand]);
+
+  if(Instruction* inst = dyn_cast<Instruction>(Operand))
+    if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end())
+      return GetValueName(deleteAndReplaceInsts[inst]);
 
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end())
     return inlinedArgNames[Operand];
@@ -5790,6 +5819,8 @@ bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
 }
 
 bool CWriter::canDeclareLocalLate(Instruction &I) {
+  if(toDeclareLocal.find(&I) != toDeclareLocal.end()) return true;
+
   if (!DeclareLocalsLate) {
     return false;
   }
@@ -5865,16 +5896,18 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      bool printedType = false;
      for(auto [sextInst, inst] : declareAsCastedType)
        if(inst == I){
+          errs() << "SUSAN: printing type at 5874: " << *(sextInst->getType()) << "\n";
          printTypeNameForAddressableValue(Out, sextInst->getType(), true);
          printedType = true;
          break;
        }
 
      auto type2print = AI->getAllocatedType();
-     if(allocaTypeChange.find(AI) != allocaTypeChange.end())
-       type2print = allocaTypeChange[AI];
+     //if(allocaTypeChange.find(AI) != allocaTypeChange.end())
+     //  type2print = allocaTypeChange[AI];
 
      if(!printedType){
+          errs() << "SUSAN: printing type at 5885: " << *(type2print) << "\n";
        if(signedInsts.find(I) != signedInsts.end())
          printTypeNameForAddressableValue(Out, type2print, true);
        else
@@ -5921,12 +5954,14 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
        bool printedType = false;
        for(auto [sextInst, inst] : declareAsCastedType)
          if(inst == I){
+           errs() << "SUSAN: printing type at 5930: " << *(sextInst->getType()) << "\n";
            printTypeName(Out, sextInst->getType(), true) << ' ' << varName;
            printedType = true;
            break;
          }
 
        if(!printedType){
+         errs() << "SUSAN: printing type at 5937: " << *(I->getType()) << "\n";
          if(signedInsts.find(I) != signedInsts.end())
            printTypeName(Out, I->getType(), true) << ' ' << varName;
          else
@@ -6212,10 +6247,12 @@ void CWriter::printFunction(Function &F, bool inlineF) {
                 //Note: if it's IV, we know how to handle it and doesn't need to be deleted
                 //Note: if one of them is alloca, it should be fine
                 if(isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var])){
-                  if(isa<AllocaInst>(operand) && MRVar2Vals[var])
-                    allocaTypeChange[operand] = MRVar2Vals[var]->getType();
-                  else if(isa<AllocaInst>(MRVar2Vals[var]) && operand)
-                    allocaTypeChange[MRVar2Vals[var]] = operand->getType();
+                  //if(isa<AllocaInst>(operand) && MRVar2Vals[var])
+                  //  allocaTypeChange[operand] = MRVar2Vals[var]->getType();
+                  //else if(isa<AllocaInst>(MRVar2Vals[var]) && operand)
+                  //  allocaTypeChange[MRVar2Vals[var]] = operand->getType();
+
+                  errs() << "SUSAN: inst at 6227: " << *inst << "\n";
                   continue;
                 }
                 if(!isInductionVariable(operand) && !isIVIncrement(operand)){
@@ -6310,13 +6347,13 @@ void CWriter::printFunction(Function &F, bool inlineF) {
           if(nestedInOmpLoop) break;
           L = L->getParentLoop();
         }
-        if(nestedInOmpLoop){
-          bool isDeclared = false;
-          DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
-          errs() << "SUSAN: adding iv to declared locals: " << *LP->IV << "\n";
-          omp_declaredLocals[L].insert(LP->IV);
-          continue;
-        }
+        //if(nestedInOmpLoop){
+        //  bool isDeclared = false;
+        //  DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+        //  errs() << "SUSAN: adding iv to declared locals: " << *LP->IV << "\n";
+        //  omp_declaredLocals[L].insert(LP->IV);
+        //  continue;
+        //}
       }
       Loop *L = LP->L;
       std::set<Value*> skipInsts;
@@ -6328,7 +6365,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
         BasicBlock *BB = L->getBlocks()[i];
         for(auto &I : *BB){
           Instruction *inst = &I;
-          errs() << "SUSAN: at 6288: " << *inst << "\n";
+          if(isInductionVariable(inst)) continue;
           if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
           //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
           //if(deadInsts.find(inst) != deadInsts.end()) continue;
@@ -6340,16 +6377,18 @@ void CWriter::printFunction(Function &F, bool inlineF) {
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           errs() << "SUSAN: at 6296: " << *inst << "\n";
           bool isDeclared = false;
-          DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
-          errs() << "SUSAN: declared local: " << *inst << "\n";
-          if(isDeclared) omp_declaredLocals[L].insert(inst);
+          //DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
+          //errs() << "SUSAN: declared local: " << *inst << "\n";
+          //if(isDeclared) omp_declaredLocals[L].insert(inst);
+          toDeclareLocal.insert(inst);
+          errs() << "SUSAN: to declareLocal:" << *inst << "\n";
         }
       }
 
 
       //in case induction variable isn't declared
       bool isDeclared = false;
-      DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+      //DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
       //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
 
 
@@ -6357,9 +6396,12 @@ void CWriter::printFunction(Function &F, bool inlineF) {
       if(omp_liveins.find(L) != omp_liveins.end()){
         for(auto livein : omp_liveins[L]){
           if(isSkipableInst(livein)) continue;
-          isDeclared = false;
-          errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
-          DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
+          if(isInductionVariable(livein)) continue;
+          //isDeclared = false;
+          //errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
+          //DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
+          toDeclareLocal.insert(livein);
+          errs() << "SUSAN: to declareLocal:" << *livein << "\n";
         }
       }
 
@@ -6972,6 +7014,10 @@ void CWriter::printLoopNew(Loop *L) {
     errs() << "incr: " << *LP->incr << "\n";
 
     //print init statement
+
+    //print iv type
+    Out << "int ";
+
     errs() << "SUSAN: printing IV" << *LP->IV << "\n";
     Out << GetValueName(LP->IV) << " = ";
     writeOperandInternal(LP->lb);
@@ -9060,10 +9106,10 @@ void CWriter::visitCallInst(CallInst &I) {
       auto omp_declarePrivate_s = omp_declarePrivate;
       auto IVInc2IV_s = IVInc2IV;
       auto UpperBoundArgs_s = UpperBoundArgs;
-      auto allocaTypeChange_s = allocaTypeChange;
       auto IRNaming_s = IRNaming;
       auto CurLoop_s = CurLoop;
       auto CurInstr_s = CurInstr;
+      auto toDeclareLocal_s = toDeclareLocal;
 
       //inline the function
       IS_OPENMP_FUNCTION = true;
@@ -9118,7 +9164,6 @@ void CWriter::visitCallInst(CallInst &I) {
       omp_declarePrivate = omp_declarePrivate_s;
       IVInc2IV = IVInc2IV_s;
       UpperBoundArgs = UpperBoundArgs_s;
-      allocaTypeChange = allocaTypeChange_s;
       IRNaming = IRNaming_s;
       CurLoop = CurLoop_s;
       CurInstr = CurInstr_s;
@@ -9128,6 +9173,7 @@ void CWriter::visitCallInst(CallInst &I) {
       DT = &getAnalysis<DominatorTreeWrapperPass>(*F).getDomTree();
       RI = &getAnalysis<RegionInfoPass>(*F).getRegionInfo();
       SE = &getAnalysis<ScalarEvolutionWrapperPass>(*F).getSE();
+      toDeclareLocal = toDeclareLocal_s;
 
       return;
   }

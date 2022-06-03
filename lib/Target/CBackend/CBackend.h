@@ -136,7 +136,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::map<Instruction*, PHINode*> IVInc2IV;
   std::set<Value*> UpperBoundArgs;
   std::set<Instruction*> addParenthesis;
-  std::map<Value*, Type*>allocaTypeChange;
+  std::set<Instruction*> toDeclareLocal;
 
   CBERegion *topRegion;
 
