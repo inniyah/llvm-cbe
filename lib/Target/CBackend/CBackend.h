@@ -439,7 +439,7 @@ private:
   void printFloatingPointConstants(Function &F);
   void printFloatingPointConstants(const Constant *C);
 
-  void printFunction(Function &);
+  void printFunction(Function &F, bool inlineF=false);
   void printBasicBlock(BasicBlock *BB, std::set<Value*> skipInsts = std::set<Value*>());
   void printLoop(Loop *L);
   void printLoopNew(Loop *L);

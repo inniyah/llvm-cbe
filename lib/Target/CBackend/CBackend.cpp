@@ -5950,7 +5950,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
    }
 }
 
-void CWriter::printFunction(Function &F) {
+void CWriter::printFunction(Function &F, bool inlineF) {
 
   //SUSAN: collect function argument reference depths
   for(auto arg = F.arg_begin(); arg != F.arg_end(); ++arg) {
@@ -5963,13 +5963,15 @@ void CWriter::printFunction(Function &F) {
   /// isStructReturn - Should this function actually return a struct by-value?
   bool isStructReturn = F.hasStructRetAttr();
 
-  cwriter_assert(!F.isDeclaration());
-  if (F.hasDLLImportStorageClass())
-    Out << "__declspec(dllimport) ";
-  if (F.hasDLLExportStorageClass())
-    Out << "__declspec(dllexport) ";
-  if (F.hasLocalLinkage())
-    Out << "static ";
+  if(!inlineF){
+    cwriter_assert(!F.isDeclaration());
+    if (F.hasDLLImportStorageClass())
+      Out << "__declspec(dllimport) ";
+    if (F.hasDLLExportStorageClass())
+      Out << "__declspec(dllexport) ";
+    if (F.hasLocalLinkage())
+      Out << "static ";
+  }
 
   std::string Name = GetValueName(&F);
 
@@ -5993,33 +5995,35 @@ void CWriter::printFunction(Function &F) {
   /*
    * OpenMP: remove first two args from outline
    */
-  if(IS_OPENMP_FUNCTION)
-    printFunctionProto(Out, FTy,
+  if(!inlineF){
+    if(IS_OPENMP_FUNCTION)
+      printFunctionProto(Out, FTy,
                      std::make_pair(F.getAttributes(), F.getCallingConv()),
                      Name, &args, 2);
-  else
-    printFunctionProto(Out, FTy,
+    else
+      printFunctionProto(Out, FTy,
                      std::make_pair(F.getAttributes(), F.getCallingConv()),
                      Name, &args);
 
-  Out << " {\n";
+    Out << " {\n";
 
-  if (shouldFixMain) {
-    // Cast the arguments to main() to the expected LLVM IR types and names.
-    unsigned Idx = 1;
-    FunctionType::param_iterator I = FTy->param_begin(), E = FTy->param_end();
-    Function::arg_iterator ArgName = args.begin();
+    if (shouldFixMain) {
+      // Cast the arguments to main() to the expected LLVM IR types and names.
+      unsigned Idx = 1;
+      FunctionType::param_iterator I = FTy->param_begin(), E = FTy->param_end();
+      Function::arg_iterator ArgName = args.begin();
 
-    for (; I != E; ++I) {
-      Type *ArgTy = *I;
-      Out << "  ";
-      printTypeName(Out, ArgTy);
-      Out << ' ' << GetValueName(ArgName) << " = (";
-      printTypeName(Out, ArgTy);
-      Out << ")" << MainArgs.begin()[Idx].second << ";\n";
+      for (; I != E; ++I) {
+        Type *ArgTy = *I;
+        Out << "  ";
+        printTypeName(Out, ArgTy);
+        Out << ' ' << GetValueName(ArgName) << " = (";
+        printTypeName(Out, ArgTy);
+        Out << ")" << MainArgs.begin()[Idx].second << ";\n";
 
-      ++Idx;
-      ++ArgName;
+        ++Idx;
+        ++ArgName;
+      }
     }
   }
 
@@ -6442,7 +6446,8 @@ void CWriter::printFunction(Function &F) {
     times2bePrinted[BB]--;
   }
 
-  Out << "}\n\n";
+  if(!inlineF)
+    Out << "}\n\n";
 }
 
 void CWriter::printCmpOperator(ICmpInst *icmp, bool negateCondition){
@@ -9038,7 +9043,7 @@ void CWriter::visitCallInst(CallInst &I) {
       RunAllAnalysis(*utask);
       // Output all floating point constants that cannot be printed accurately.
       printFloatingPointConstants(*utask);
-      printFunction(*utask);
+      printFunction(*utask, true);
 
 
       //recover data for current function
