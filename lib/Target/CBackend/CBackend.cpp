@@ -3194,6 +3194,9 @@ std::string CWriter::GetValueName(Value *Operand) {
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
     return GetValueName(InstsToReplaceByPhi[Operand]);
 
+  if(inlinedArgNames.find(Operand) != inlinedArgNames.end())
+    return inlinedArgNames[Operand];
+
   //SUSAN: where the vairable names are printed
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for(auto inst2var : IRNaming)
@@ -8979,6 +8982,30 @@ void CWriter::visitCallInst(CallInst &I) {
       Out << "  #pragma omp parallel \n" << "\n";
       // Create a Call to omp_outlined
       auto utask = ompFuncs[&I];
+
+
+      inlinedArgNames.clear();
+      // build arg->argInput table
+      int numArgs = std::distance(utask->arg_begin(), utask->arg_end())-2;
+      for(auto idx = 3; idx < numArgs+3; ++idx) {
+        Value *argInput = I.getArgOperand(idx);
+        Value *arg = utask->getArg(idx-1);
+        errs() << "SUSAN: argInput: " << *argInput << "\n";
+        errs() << "SUSAN: arg: " << *arg << "\n";
+        if(isAddressExposed(argInput)){
+          for (inst_iterator I = inst_begin(utask), E = inst_end(utask); I != E; ++I) {
+            if(!isa<LoadInst>(&*I)) continue;
+            LoadInst* ldInst = cast<LoadInst>(&*I);
+            if(ldInst->getPointerOperand() == arg)
+              addressExposedLoads.insert(ldInst);
+          }
+        }
+
+        auto argName = GetValueName(argInput);
+        errs() << "SUSAN: argName: " << argName << "\n";
+        inlinedArgNames[arg] = argName;
+      }
+
       /*Out << "  " << GetValueName(utask) << "(";
 
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end()) - 2;
@@ -10174,6 +10201,10 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
 void CWriter::visitLoadInst(LoadInst &I) {
   errs() << "SUSAN: curinstr before loadinst: " << *CurInstr << "\n";
   CurInstr = &I;
+
+  // for omp inlining
+  if(addressExposedLoads.find(&I) != addressExposedLoads.end())
+    return writeOperand(I.getPointerOperand());
 
   writeMemoryAccess(I.getOperand(0), I.getType(), I.isVolatile(),
                     I.getAlignment());

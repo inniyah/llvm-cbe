@@ -85,6 +85,10 @@ public:
 /// module to a C translation unit.
 class CWriter : public ModulePass, public InstVisitor<CWriter> {
 
+  //SUSAN: tables not need to be saved when inlining
+  std::map<Value*, std::string> inlinedArgNames;
+  std::set<LoadInst*> addressExposedLoads;
+
   // SUSAN: tables for variable preservation
   std::set<std::pair<Instruction*, StringRef>> IRNaming;
   std::set<StringRef>allVars, phiVars;
