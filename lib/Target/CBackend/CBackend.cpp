@@ -5887,9 +5887,9 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
 
    if (AllocaInst *AI = isDirectAlloca(I)) {
      auto varName = GetValueName(AI);
-     errs() << "SUSAN: declaring varName 5264: " << varName << "\n";
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
      declaredLocals.insert(varName);
+     errs() << "SUSAN: declaring varName 5264: " << varName << "\n";
 
      Out << "  ";
 
@@ -5926,7 +5926,6 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      PrintedVar = true;
      isDeclared = true;
    } else if (!isEmptyType(I->getType()) && !isInlinableInst(*I)) {
-     errs() << "SUSAN: inst at 5840: " << *I << "\n";
 
     /*
      * OpenMP: skip some declarations related to OpenMP calls
@@ -5943,11 +5942,15 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
      auto varName = GetValueName(I);
      errs() << "SUSAN: declaring varName 5298: " << varName << "\n";
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
+     errs() << "SUSAN: declared locals:\n";
+    for(auto local : declaredLocals)
+      errs() << local << "\n";
      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
        auto varName = GetValueName(I);
        if(declaredLocals.find(varName) != declaredLocals.end()) return;
        declaredLocals.insert(varName);
 
+        errs() << "SUSAN: inst at 5950: " << *I << "\n";
        errs() << "SUSAN: declaring " << *I << "\n";
        Out << "  ";
 
@@ -6331,9 +6334,9 @@ void CWriter::printFunction(Function &F, bool inlineF) {
     //  if(LP->isOmpLoop)
     //    OMP_RecordLiveIns(LP);
     //find all the local variables to declare
+    std::set<std::string> declaredLocals;
     for(auto LP : LoopProfiles){
       if(!LP->isForLoop) continue;
-      std::set<std::string> declaredLocals;
       //if(!LP->isOmpLoop) continue;
       if(!LP->isOmpLoop){
         bool nestedInOmpLoop = false;
@@ -6376,18 +6379,27 @@ void CWriter::printFunction(Function &F, bool inlineF) {
           if(dyn_cast<PHINode>(inst)) continue;
           if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
           errs() << "SUSAN: at 6296: " << *inst << "\n";
-          bool isDeclared = false;
+          //bool isDeclared = false;
           //DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
           //errs() << "SUSAN: declared local: " << *inst << "\n";
           //if(isDeclared) omp_declaredLocals[L].insert(inst);
-          toDeclareLocal.insert(inst);
+          auto varName = GetValueName(inst);
+          if(declaredLocals.find(varName) == declaredLocals.end()){
+            if (AllocaInst *AI = isDirectAlloca(inst)) {
+              declaredLocals.insert(varName);
+              toDeclareLocal.insert(inst);
+            } else if (!isEmptyType(inst->getType()) && !isInlinableInst(*inst)) {
+              declaredLocals.insert(varName);
+              toDeclareLocal.insert(inst);
+            }
+          }
           errs() << "SUSAN: to declareLocal:" << *inst << "\n";
         }
       }
 
 
       //in case induction variable isn't declared
-      bool isDeclared = false;
+      //bool isDeclared = false;
       //DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
       //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
 
@@ -6400,8 +6412,18 @@ void CWriter::printFunction(Function &F, bool inlineF) {
           //isDeclared = false;
           //errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
           //DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
-          toDeclareLocal.insert(livein);
-          errs() << "SUSAN: to declareLocal:" << *livein << "\n";
+          //toDeclareLocal.insert(livein);
+          //errs() << "SUSAN: to declareLocal:" << *livein << "\n";
+          auto varName = GetValueName(livein);
+          if(declaredLocals.find(varName) == declaredLocals.end()){
+            if (AllocaInst *AI = isDirectAlloca(livein)) {
+              declaredLocals.insert(varName);
+              toDeclareLocal.insert(livein);
+            } else if (!isEmptyType(livein->getType()) && !isInlinableInst(*livein)) {
+              declaredLocals.insert(varName);
+              toDeclareLocal.insert(livein);
+            }
+          }
         }
       }
 
@@ -9025,7 +9047,7 @@ void CWriter::visitCallInst(CallInst &I) {
    * OpenMP: skip omp runtime call
    */
   if(ompFuncs.find(&I) != ompFuncs.end()){
-      Out << "  #pragma omp parallel \n" << "\n";
+      Out << "  #pragma omp parallel \n" << "{\n";
       // Create a Call to omp_outlined
       auto utask = ompFuncs[&I];
 
@@ -9175,6 +9197,7 @@ void CWriter::visitCallInst(CallInst &I) {
       SE = &getAnalysis<ScalarEvolutionWrapperPass>(*F).getSE();
       toDeclareLocal = toDeclareLocal_s;
 
+      Out << "}\n";
       return;
   }
 
