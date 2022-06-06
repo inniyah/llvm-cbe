@@ -1395,8 +1395,14 @@ void CWriter::EliminateDeadInsts(Function &F){
             if(isa<TruncInst>(U)){
               TruncInst* trunc = cast<TruncInst>(U);
               for (User *truncU : trunc->users())
-                if(isa<StoreInst>(truncU))
+                if(isa<StoreInst>(truncU)){
+                  errs() << "SUSAN: dead trunc: " << *truncU << "\n";
                   deadInsts.insert(cast<Instruction>(truncU));
+                  StoreInst* store = cast<StoreInst>(truncU);
+                  Instruction* ptrOpnd = dyn_cast<Instruction>(store->getPointerOperand());
+                  if(!ptrOpnd) continue;
+                  deadInsts.insert(ptrOpnd);
+                }
             }
         }
       }
@@ -1637,6 +1643,8 @@ bool CWriter::runOnModule(Module &M) {
   bool Modified = false;
   findOMPFunctions(M);
   for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI) {
+    declaredLocals.clear();
+
     Function *F = &*FI;
     if(F->isIntrinsic()) continue;
     if(F->isDeclaration()) continue;
@@ -5819,7 +5827,7 @@ bool CWriter::isNotDuplicatedDeclaration(Instruction *I, bool isPhi) {
 }
 
 bool CWriter::canDeclareLocalLate(Instruction &I) {
-  if(toDeclareLocal.find(&I) != toDeclareLocal.end()) return true;
+  //if(toDeclareLocal.find(&I) != toDeclareLocal.end()) return true;
 
   if (!DeclareLocalsLate) {
     return false;
@@ -6311,12 +6319,14 @@ void CWriter::printFunction(Function &F, bool inlineF) {
   // print local variable information for the function
   bool isDeclared = false;
   if(!IS_OPENMP_FUNCTION){
-     std::set<std::string> declaredLocals;
-     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
-       if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end()){
-         errs() << "SUSAN: declaring local: " << *I << "\n";
-         DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
-       }
+     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I){
+       //if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end()){
+       if(InstsToReplaceByPhi.find(&*I) != InstsToReplaceByPhi.end()) continue;
+       if(deadInsts.find(&*I) != deadInsts.end()) continue;
+       errs() << "SUSAN: declaring local: " << *I << "\n";
+       DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
+       //}
+     }
   }
 
   if (PrintedVar)
@@ -6329,106 +6339,109 @@ void CWriter::printFunction(Function &F, bool inlineF) {
    * Record Liveins
    * Only prints the loop
    */
-  if(IS_OPENMP_FUNCTION){
-    //for(auto LP : LoopProfiles)
-    //  if(LP->isOmpLoop)
-    //    OMP_RecordLiveIns(LP);
-    //find all the local variables to declare
-    std::set<std::string> declaredLocals;
-    for(auto LP : LoopProfiles){
-      if(!LP->isForLoop) continue;
-      //if(!LP->isOmpLoop) continue;
-      if(!LP->isOmpLoop){
-        bool nestedInOmpLoop = false;
-        Loop *L = LP->L->getParentLoop();
-        while(L){
-          for(auto lp : LoopProfiles)
-            if(lp->L == L && lp->isOmpLoop){
-              nestedInOmpLoop = true;
-              break;
-            }
-          if(nestedInOmpLoop) break;
-          L = L->getParentLoop();
-        }
-        //if(nestedInOmpLoop){
-        //  bool isDeclared = false;
-        //  DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
-        //  errs() << "SUSAN: adding iv to declared locals: " << *LP->IV << "\n";
-        //  omp_declaredLocals[L].insert(LP->IV);
-        //  continue;
-        //}
-      }
-      Loop *L = LP->L;
-      std::set<Value*> skipInsts;
-      bool negateCondition;
-      Instruction *condInst = findCondInst(L, negateCondition);
-      BasicBlock *condBlock = condInst->getParent();
-      findCondRelatedInsts(condBlock, skipInsts);
-      for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
-        BasicBlock *BB = L->getBlocks()[i];
-        for(auto &I : *BB){
-          Instruction *inst = &I;
-          if(isInductionVariable(inst)) continue;
-          if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
-          //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
-          //if(deadInsts.find(inst) != deadInsts.end()) continue;
-          if(isInlinableInst(*inst))
-            errs() << "SUSAN: isinlinable!! " << *inst << "\n";
-          if(isSkipableInst(inst) && !isInlinableInst(*inst)) continue;
-          errs() << "SUSAN: at 6293: " << *inst << "\n";
-          if(dyn_cast<PHINode>(inst)) continue;
-          if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
-          errs() << "SUSAN: at 6296: " << *inst << "\n";
-          //bool isDeclared = false;
-          //DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
-          //errs() << "SUSAN: declared local: " << *inst << "\n";
-          //if(isDeclared) omp_declaredLocals[L].insert(inst);
-          auto varName = GetValueName(inst);
-          if(declaredLocals.find(varName) == declaredLocals.end()){
-            if (AllocaInst *AI = isDirectAlloca(inst)) {
-              declaredLocals.insert(varName);
-              toDeclareLocal.insert(inst);
-            } else if (!isEmptyType(inst->getType()) && !isInlinableInst(*inst)) {
-              declaredLocals.insert(varName);
-              toDeclareLocal.insert(inst);
-            }
-          }
-          errs() << "SUSAN: to declareLocal:" << *inst << "\n";
-        }
-      }
+  //if(IS_OPENMP_FUNCTION){
+  //  //for(auto LP : LoopProfiles)
+  //  //  if(LP->isOmpLoop)
+  //  //    OMP_RecordLiveIns(LP);
+  //  //find all the local variables to declare
+  //  std::set<std::string> declaredLocals;
+  //  for(auto LP : LoopProfiles){
+  //    if(!LP->isForLoop) continue;
+  //    //if(!LP->isOmpLoop) continue;
+  //    //if(!LP->isOmpLoop){
+  //    //  bool nestedInOmpLoop = false;
+  //    //  Loop *L = LP->L->getParentLoop();
+  //    //  while(L){
+  //    //    for(auto lp : LoopProfiles)
+  //    //      if(lp->L == L && lp->isOmpLoop){
+  //    //        nestedInOmpLoop = true;
+  //    //        break;
+  //    //      }
+  //    //    if(nestedInOmpLoop) break;
+  //    //    L = L->getParentLoop();
+  //    //  }
+  //    //  //if(nestedInOmpLoop){
+  //    //  //  bool isDeclared = false;
+  //    //  //  DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+  //    //  //  errs() << "SUSAN: adding iv to declared locals: " << *LP->IV << "\n";
+  //    //  //  omp_declaredLocals[L].insert(LP->IV);
+  //    //  //  continue;
+  //    //  //}
+  //    //}
+  //    Loop *L = LP->L;
+  //    std::set<Value*> skipInsts;
+  //    bool negateCondition;
+  //    Instruction *condInst = findCondInst(L, negateCondition);
+  //    BasicBlock *condBlock = condInst->getParent();
+  //    findCondRelatedInsts(condBlock, skipInsts);
+  //    for (unsigned i = 0, e = L->getBlocks().size(); i != e; ++i) {
+  //      BasicBlock *BB = L->getBlocks()[i];
+  //      for(auto &I : *BB){
+  //        Instruction *inst = &I;
+  //        if(isInductionVariable(inst)) continue;
+  //        if(omp_SkipVals.find(inst) != omp_SkipVals.end()) continue;
+  //        //if(skipInstsForPhis.find(inst) != skipInstsForPhis.end()) continue;
+  //        //if(deadInsts.find(inst) != deadInsts.end()) continue;
+  //        if(isInlinableInst(*inst))
+  //          errs() << "SUSAN: isinlinable!! " << *inst << "\n";
+  //        if(isSkipableInst(inst) && !isInlinableInst(*inst)) continue;
+  //        errs() << "SUSAN: at 6293: " << *inst << "\n";
+  //        if(dyn_cast<PHINode>(inst)) continue;
+  //        if(skipInsts.find(cast<Value>(inst)) != skipInsts.end()) continue;
+  //        errs() << "SUSAN: at 6296: " << *inst << "\n";
+  //        //bool isDeclared = false;
+  //        //DeclareLocalVariable(inst, PrintedVar, isDeclared, declaredLocals);
+  //        //errs() << "SUSAN: declared local: " << *inst << "\n";
+  //        //if(isDeclared) omp_declaredLocals[L].insert(inst);
+  //        auto varName = GetValueName(inst);
+  //        if(declaredLocals.find(varName) == declaredLocals.end()){
+  //          if (AllocaInst *AI = isDirectAlloca(inst)) {
+  //            declaredLocals.insert(varName);
+  //            toDeclareLocal.insert(inst);
+  //            errs() << "SUSAN: to declareLocal 6391:" << *inst << "\n";
+  //          } else if (!isEmptyType(inst->getType()) && !isInlinableInst(*inst)) {
+  //            declaredLocals.insert(varName);
+  //            toDeclareLocal.insert(inst);
+  //            errs() << "SUSAN: to declareLocal 6395:" << *inst << "\n";
+  //          }
+  //        }
+  //      }
+  //    }
 
 
-      //in case induction variable isn't declared
-      //bool isDeclared = false;
-      //DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
-      //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
+  //    //in case induction variable isn't declared
+  //    //bool isDeclared = false;
+  //    //DeclareLocalVariable(LP->IV, PrintedVar, isDeclared, declaredLocals);
+  //    //if(isDeclared) omp_declaredLocals[L].insert(LP->IV);
 
 
-      //declare all the liveins
-      if(omp_liveins.find(L) != omp_liveins.end()){
-        for(auto livein : omp_liveins[L]){
-          if(isSkipableInst(livein)) continue;
-          if(isInductionVariable(livein)) continue;
-          //isDeclared = false;
-          //errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
-          //DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
-          //toDeclareLocal.insert(livein);
-          //errs() << "SUSAN: to declareLocal:" << *livein << "\n";
-          auto varName = GetValueName(livein);
-          if(declaredLocals.find(varName) == declaredLocals.end()){
-            if (AllocaInst *AI = isDirectAlloca(livein)) {
-              declaredLocals.insert(varName);
-              toDeclareLocal.insert(livein);
-            } else if (!isEmptyType(livein->getType()) && !isInlinableInst(*livein)) {
-              declaredLocals.insert(varName);
-              toDeclareLocal.insert(livein);
-            }
-          }
-        }
-      }
+  //    //declare all the liveins
+  //    if(omp_liveins.find(L) != omp_liveins.end()){
+  //      for(auto livein : omp_liveins[L]){
+  //        if(isSkipableInst(livein)) continue;
+  //        if(isInductionVariable(livein)) continue;
+  //        //isDeclared = false;
+  //        //errs() << "SUSAN: declaring omp livein: " << *livein << "\n";
+  //        //DeclareLocalVariable(livein, PrintedVar, isDeclared, declaredLocals);
+  //        //toDeclareLocal.insert(livein);
+  //        //errs() << "SUSAN: to declareLocal:" << *livein << "\n";
+  //        auto varName = GetValueName(livein);
+  //        if(declaredLocals.find(varName) == declaredLocals.end()){
+  //          if (AllocaInst *AI = isDirectAlloca(livein)) {
+  //            errs() << "6420: insert livein varname: " << varName << "livein: " << *livein << "\n";
+  //            declaredLocals.insert(varName);
+  //            toDeclareLocal.insert(livein);
+  //          } else if (!isEmptyType(livein->getType()) && !isInlinableInst(*livein)) {
+  //            errs() << "6424: insert livein varname: " << varName << "livein: " << *livein << "\n";
+  //            declaredLocals.insert(varName);
+  //            toDeclareLocal.insert(livein);
+  //          }
+  //        }
+  //      }
+  //    }
 
-    }
-  }
+  //  }
+  //}
     /*for(auto LP : LoopProfiles){
       if(!LP->isOmpLoop) continue;
       for(auto I : omp_liveins[LP->L]){
@@ -6795,7 +6808,12 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
     if(bb2phi.first == BB){
       PHINode *phi = bb2phi.second;
       if(deadInsts.find(phi) != deadInsts.end()) continue;
+      auto varName = GetValueName(phi);
       Out << std::string(2, ' ');
+      if(declaredLocals.find(varName) == declaredLocals.end()){
+        printTypeName(Out, phi->getType(), false) << ' ';
+        declaredLocals.insert(varName);
+      }
       Out << GetValueName(phi) << " = ";
       writeOperandInternal(phi->getIncomingValueForBlock(BB));
       Out << ";\n";
@@ -7251,14 +7269,15 @@ if( NATURAL_CONTROL_FLOW ){
       errs() << "SUSAN: printing instruction " << *II << " at 6678\n";
       if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
         Out << "  ";
-      else
-        errs() << "SUSAN: found emptytype: " << *II << "\n";
 
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
-        if (canDeclareLocalLate(*II)) {
+        auto varName = GetValueName(&*II);
+        //if (canDeclareLocalLate(*II)) {
+        if(declaredLocals.find(varName) == declaredLocals.end()){
           printTypeName(Out, II->getType(), false) << ' ';
+          declaredLocals.insert(varName);
         }
-        Out << GetValueName(&*II) << " = ";
+        Out << varName << " = ";
       }
       writeInstComputationInline(*II);
 
@@ -9131,7 +9150,7 @@ void CWriter::visitCallInst(CallInst &I) {
       auto IRNaming_s = IRNaming;
       auto CurLoop_s = CurLoop;
       auto CurInstr_s = CurInstr;
-      auto toDeclareLocal_s = toDeclareLocal;
+      //auto toDeclareLocal_s = toDeclareLocal;
 
       //inline the function
       IS_OPENMP_FUNCTION = true;
@@ -9195,7 +9214,7 @@ void CWriter::visitCallInst(CallInst &I) {
       DT = &getAnalysis<DominatorTreeWrapperPass>(*F).getDomTree();
       RI = &getAnalysis<RegionInfoPass>(*F).getRegionInfo();
       SE = &getAnalysis<ScalarEvolutionWrapperPass>(*F).getSE();
-      toDeclareLocal = toDeclareLocal_s;
+      //toDeclareLocal = toDeclareLocal_s;
 
       Out << "}\n";
       return;
