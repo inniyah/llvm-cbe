@@ -2603,6 +2603,7 @@ static bool isFPCSafeToPrint(const ConstantFP *CFP) {
 /// necessary for conversion to the destination type, if necessary.
 /// @brief Print a cast
 void CWriter::printCast(unsigned opc, Type *SrcTy, Type *DstTy) {
+  errs() << "SUSAN: printing cast from: " << *SrcTy << " to " << *DstTy << "\n";
   // Print the destination type cast
   switch (opc) {
   case Instruction::UIToFP:
@@ -3235,6 +3236,9 @@ std::string CWriter::GetValueName(Value *Operand) {
     if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end())
       return GetValueName(deleteAndReplaceInsts[inst]);
 
+  if(TruncInst *inst = dyn_cast<TruncInst>(Operand))
+    return GetValueName(inst->getOperand(0));
+
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end())
     return inlinedArgNames[Operand];
 
@@ -3333,6 +3337,9 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
 void CWriter::writeOperandInternal(Value *Operand,
                                    enum OperandContext Context, bool startExpression) {
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+    errs() << "SUSAN: returning inlined name 3339: " << inlinedArgNames[Operand];
+    if(valuesCast2Double.find(Operand) != valuesCast2Double.end())
+      Out << "(double*)";
     Out << inlinedArgNames[Operand];
     return;
   }
@@ -3419,6 +3426,9 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
     }
   }*/
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+    errs() << "SUSAN: returning inlined name 3426: " << inlinedArgNames[Operand];
+    if(valuesCast2Double.find(Operand) != valuesCast2Double.end())
+      Out << "(double*)";
     Out << inlinedArgNames[Operand];
     return;
   }
@@ -8529,6 +8539,7 @@ static const char *getFloatBitCastField(Type *Ty) {
 
 void CWriter::visitCastInst(CastInst &I) {
   CurInstr = &I;
+  errs() << "SUSAN: visiting cast: " << I << "\n";
   Type *DstTy = I.getType();
   Type *SrcTy = I.getOperand(0)->getType();
   if(isa<TruncInst>(&I)){
@@ -9070,24 +9081,41 @@ bool CWriter::RunAllAnalysis(Function &F){
    return Modified;
 }
 
-void CWriter::omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs){
+void CWriter::omp_findInlinedStructInputs(Value* argInput, std::vector<Value*> &argInputs){
   for(auto U : argInput->users()){
     GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(U);
     if(!gep) continue;
-    errs() << "SUSAN: found gep for struct 9061: " << *gep << "\n";
     ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(2));
-    errs() << "SUSAN: found index for struct 9064: " << *constint << "\n";
-    int idx = constint->getSExtValue();
+    //int idx = constint->getSExtValue();
+    //StructType *sourceElTy = dyn_cast<StructType>(gep->getSourceElementType());
+    //errs() << "SUSAN: sourceElTy: " << *sourceElTy << "\n";
+    //int newIdx = 0;
+    //for(int i=0; i<idx; i++){
+    //  Type* ty = sourceElTy->getElementType(i);
+    //  if(ty->isDoubleTy() || ty->isPointerTy())
+    //    newIdx += 8;
+    //  else if(IntegerType *intTy = dyn_cast<IntegerType>(ty))
+    //    newIdx += intTy->getBitWidth()/8;
+    //}
+    //errs() << "SUSAN: newIdx: " << newIdx << "\n";
     for(auto storeU : gep->users()){
-      StoreInst *store = dyn_cast<StoreInst>(storeU);
-      if(!store) continue;
-      errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
-      argInputs[idx] = store->getOperand(0);
+      if(StoreInst *store = dyn_cast<StoreInst>(storeU)){
+        errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
+        argInputs.push_back(store->getOperand(0));
+      }
+      else if(CastInst *cast = dyn_cast<CastInst>(storeU)){
+        for(auto storeU : cast->users()){
+          StoreInst *store = dyn_cast<StoreInst>(storeU);
+          if(!store) continue;
+          errs() << "SUSAN: found store for struct 9095: " << *store << "\n";
+          argInputs.push_back(store->getOperand(0));
+        }
+      }
     }
   }
 }
 
-void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args){
+void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> &args){
   for(auto U : arg->users()){
     Instruction* inst = dyn_cast<Instruction>(U);
     if(!inst) continue;
@@ -9095,21 +9123,25 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*
       for(auto ldU : inst->users()){
         LoadInst* ld = dyn_cast<LoadInst>(ldU);
         if(!ld) continue;
-        args[0] = ld;
+        args.push_back(ld);
         errs() << "SUSAN: found load for struct 9084: 0" << *ld << "\n";
       }
     }
     if(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(inst)){
       ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(1));
-      int idx = constint->getSExtValue();
       for(auto castU : gep->users()){
         CastInst *cast = dyn_cast<CastInst>(castU);
         if(!cast) continue;
         for(auto ldU : cast->users()){
           LoadInst *ld = dyn_cast<LoadInst>(ldU);
+
           if(!ld) continue;
-          errs() << "SUSAN: found load for struct 9096: " << idx/8 << " " << *ld << "\n";
-          args[idx/8] = ld;
+          args.push_back(ld);
+
+          if(PointerType *ptrTy = dyn_cast<PointerType>(cast->getDestTy()))
+            if(ptrTy = dyn_cast<PointerType>(ptrTy->getPointerElementType()))
+              if(ptrTy->getPointerElementType()->isDoubleTy())
+                valuesCast2Double.insert(ld);
 
           for(auto ldValU : ld->users()){
             LoadInst *ldVal = dyn_cast<LoadInst>(ldValU);
@@ -9159,12 +9191,22 @@ void CWriter::visitCallInst(CallInst &I) {
         //unroll structs
         if(PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType())){
           if(isa<StructType>(ptrTy->getPointerElementType())){
-            std::map<int, Value*> argInputs, args;
+            std::vector<Value*> argInputs, args;
             omp_findInlinedStructInputs(argInput, argInputs);
             omp_findCorrespondingUsesOfStruct(arg, args);
-            for(auto [idx, argInput] : argInputs){
-              auto arg = args[idx];
+            for(int i=0; i<args.size(); i++){
+              auto arg = args[i];
+              auto argInput = argInputs[i];
               auto argName = GetValueName(argInput);
+              if(declaredLocals.find(argName) == declaredLocals.end())
+                if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
+                  printTypeName(Out, argInputInst->getType(), false) << ' ';
+                  Out << GetValueName(argInputInst) << " = ";
+                  writeInstComputationInline(*argInputInst);
+                  Out << ";\n";
+                }
+              errs() << "SUSAN: argName" << argName << "\n";
+              errs() << "SUSAN: arg from struct: " << *arg << "\n";
               inlinedArgNames[arg] = argName;
             }
             continue;
@@ -9175,7 +9217,13 @@ void CWriter::visitCallInst(CallInst &I) {
           inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
         } else {
           auto argName = GetValueName(argInput);
-          errs() << "SUSAN: argName: " << argName << "\n";
+          if(declaredLocals.find(argName) == declaredLocals.end())
+            if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
+              printTypeName(Out, argInputInst->getType(), false) << ' ';
+              Out << GetValueName(argInputInst) << " = ";
+              writeInstComputationInline(*argInputInst);
+              Out << ";\n";
+            }
           inlinedArgNames[arg] = argName;
         }
       }
@@ -9979,6 +10027,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
     if(accessMemory){
       //if index is negative, it's treated as a block of memory, and should be translated as *(x-offset) (Hofstadter-Q-sequence)
       if(currValue2DerefCnt.second){
+        errs() << "SUSAN: writing ptr 10000:" << *Ptr << "\n";
         currValue2DerefCnt.second--;
         if(NegOpnd.find(FirstOp) != NegOpnd.end()){
           Out << "*(";
@@ -10007,6 +10056,7 @@ bool CWriter::printGEPExpressionStruct(Value *Ptr, gep_type_iterator I,
 
 
       if(!isConstantNull(FirstOp) && !printReference){
+        errs() << "SUSAN: writing ptr 10029:" << *Ptr << "\n";
         Out << '(';
         writeOperandInternal(Ptr, ContextNormal, false);
         Out << '+';
@@ -10376,10 +10426,12 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
 void CWriter::visitLoadInst(LoadInst &I) {
   errs() << "SUSAN: curinstr before loadinst: " << *CurInstr << "\n";
   CurInstr = &I;
-
+  errs() << "SUSAN: loadInst: " << I << "\n";
   // for omp inlining struct
   if(inlinedArgNames.find(&I) != inlinedArgNames.end()){
     Out << inlinedArgNames[&I];
+    if(valuesCast2Double.find(&I) != valuesCast2Double.end())
+      Out << "(double*)";
     errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I];
     return;
   }
