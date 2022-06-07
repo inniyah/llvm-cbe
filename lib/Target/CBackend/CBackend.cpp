@@ -3332,10 +3332,10 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
 
 void CWriter::writeOperandInternal(Value *Operand,
                                    enum OperandContext Context, bool startExpression) {
-  //if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
-  //  Out << inlinedArgNames[Operand];
-  //  return;
-  //}
+  if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+    Out << inlinedArgNames[Operand];
+    return;
+  }
 
   Instruction *inst = dyn_cast<Instruction>(Operand);
   if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
@@ -3418,10 +3418,10 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
       return;
     }
   }*/
-  //if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
-  //  Out << inlinedArgNames[Operand];
-  //  return;
-  //}
+  if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+    Out << inlinedArgNames[Operand];
+    return;
+  }
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
     writeOperand(InstsToReplaceByPhi[Operand]);
     return;
@@ -9110,6 +9110,12 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*
           if(!ld) continue;
           errs() << "SUSAN: found load for struct 9096: " << idx/8 << " " << *ld << "\n";
           args[idx/8] = ld;
+
+          for(auto ldValU : ld->users()){
+            LoadInst *ldVal = dyn_cast<LoadInst>(ldValU);
+            if(!ldVal) continue;
+            addressExposedLoads.insert(ldVal);
+          }
         }
       }
     }
@@ -10374,12 +10380,15 @@ void CWriter::visitLoadInst(LoadInst &I) {
   // for omp inlining struct
   if(inlinedArgNames.find(&I) != inlinedArgNames.end()){
     Out << inlinedArgNames[&I];
+    errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I];
     return;
   }
 
   // for omp inlining
-  if(addressExposedLoads.find(&I) != addressExposedLoads.end())
+  if(addressExposedLoads.find(&I) != addressExposedLoads.end()){
+    errs() << "SUSAN: printing inlined load: " << I << "\n";
     return writeOperand(I.getPointerOperand());
+  }
 
   writeMemoryAccess(I.getOperand(0), I.getType(), I.isVolatile(),
                     I.getAlignment());
