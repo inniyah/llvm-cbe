@@ -1407,6 +1407,10 @@ void CWriter::EliminateDeadInsts(Function &F){
         }
       }
     }
+    else if(IS_OPENMP_FUNCTION && isa<ReturnInst>(inst)){
+      errs() << "SUSAN: add return to deadinst: " << *inst << "\n";
+      deadInsts.insert(inst);
+    }
 
     if(inst->getName().contains("kmpc_loc")){
       errs() << "SUSAN: kmpc_loc found!!!\n";
@@ -3328,6 +3332,11 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
 
 void CWriter::writeOperandInternal(Value *Operand,
                                    enum OperandContext Context, bool startExpression) {
+  //if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+  //  Out << inlinedArgNames[Operand];
+  //  return;
+  //}
+
   Instruction *inst = dyn_cast<Instruction>(Operand);
   if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
     writeOperandInternal(deleteAndReplaceInsts[inst]);
@@ -3409,6 +3418,10 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
       return;
     }
   }*/
+  //if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
+  //  Out << inlinedArgNames[Operand];
+  //  return;
+  //}
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
     writeOperand(InstsToReplaceByPhi[Operand]);
     return;
@@ -6575,6 +6588,7 @@ void CWriter::printCmpOperator(ICmpInst *icmp, bool negateCondition){
 void CWriter::printInstruction(Instruction *I, bool printSemiColon){
     errs() << "SUSAN: printing instruction " << *I << " at 6003\n";
     if(omp_SkipVals.find(I) != omp_SkipVals.end()) return;
+    if(deadInsts.find(I) != deadInsts.end()) return;
     errs() << "SUSAN: did omp_SkipVals skips my inst?\n";
     Out << "  ";
     if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
@@ -7298,6 +7312,7 @@ if( NATURAL_CONTROL_FLOW ){
 // necessary because we use the instruction classes as opaque types...
 void CWriter::visitReturnInst(ReturnInst &I) {
   CurInstr = &I;
+  if(deadInsts.find(&I) != deadInsts.end()) return;
 
   // If this is a struct return function, return the temporary struct.
   bool isStructReturn = I.getParent()->getParent()->hasStructRetAttr();
@@ -9055,6 +9070,52 @@ bool CWriter::RunAllAnalysis(Function &F){
    return Modified;
 }
 
+void CWriter::omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs){
+  for(auto U : argInput->users()){
+    GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(U);
+    if(!gep) continue;
+    errs() << "SUSAN: found gep for struct 9061: " << *gep << "\n";
+    ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(2));
+    errs() << "SUSAN: found index for struct 9064: " << *constint << "\n";
+    int idx = constint->getSExtValue();
+    for(auto storeU : gep->users()){
+      StoreInst *store = dyn_cast<StoreInst>(storeU);
+      if(!store) continue;
+      errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
+      argInputs[idx] = store->getOperand(0);
+    }
+  }
+}
+
+void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args){
+  for(auto U : arg->users()){
+    Instruction* inst = dyn_cast<Instruction>(U);
+    if(!inst) continue;
+    if(isa<CastInst>(inst)){
+      for(auto ldU : inst->users()){
+        LoadInst* ld = dyn_cast<LoadInst>(ldU);
+        if(!ld) continue;
+        args[0] = ld;
+        errs() << "SUSAN: found load for struct 9084: 0" << *ld << "\n";
+      }
+    }
+    if(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(inst)){
+      ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(1));
+      int idx = constint->getSExtValue();
+      for(auto castU : gep->users()){
+        CastInst *cast = dyn_cast<CastInst>(castU);
+        if(!cast) continue;
+        for(auto ldU : cast->users()){
+          LoadInst *ld = dyn_cast<LoadInst>(ldU);
+          if(!ld) continue;
+          errs() << "SUSAN: found load for struct 9096: " << idx/8 << " " << *ld << "\n";
+          args[idx/8] = ld;
+        }
+      }
+    }
+  }
+}
+
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
 
@@ -9070,7 +9131,6 @@ void CWriter::visitCallInst(CallInst &I) {
       // Create a Call to omp_outlined
       auto utask = ompFuncs[&I];
 
-
       inlinedArgNames.clear();
       // build arg->argInput table
       int numArgs = std::distance(utask->arg_begin(), utask->arg_end())-2;
@@ -9079,6 +9139,8 @@ void CWriter::visitCallInst(CallInst &I) {
         Value *arg = utask->getArg(idx-1);
         errs() << "SUSAN: argInput: " << *argInput << "\n";
         errs() << "SUSAN: arg: " << *arg << "\n";
+
+
         if(isAddressExposed(argInput)){
           for (inst_iterator I = inst_begin(utask), E = inst_end(utask); I != E; ++I) {
             if(!isa<LoadInst>(&*I)) continue;
@@ -9088,9 +9150,28 @@ void CWriter::visitCallInst(CallInst &I) {
           }
         }
 
-        auto argName = GetValueName(argInput);
-        errs() << "SUSAN: argName: " << argName << "\n";
-        inlinedArgNames[arg] = argName;
+        //unroll structs
+        if(PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType())){
+          if(isa<StructType>(ptrTy->getPointerElementType())){
+            std::map<int, Value*> argInputs, args;
+            omp_findInlinedStructInputs(argInput, argInputs);
+            omp_findCorrespondingUsesOfStruct(arg, args);
+            for(auto [idx, argInput] : argInputs){
+              auto arg = args[idx];
+              auto argName = GetValueName(argInput);
+              inlinedArgNames[arg] = argName;
+            }
+            continue;
+          }
+        }
+
+        if(ConstantInt* constant = dyn_cast<ConstantInt>(argInput)){
+          inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
+        } else {
+          auto argName = GetValueName(argInput);
+          errs() << "SUSAN: argName: " << argName << "\n";
+          inlinedArgNames[arg] = argName;
+        }
       }
 
       /*Out << "  " << GetValueName(utask) << "(";
@@ -10289,6 +10370,12 @@ void CWriter::writeMemoryAccess(Value *Operand, Type *OperandType,
 void CWriter::visitLoadInst(LoadInst &I) {
   errs() << "SUSAN: curinstr before loadinst: " << *CurInstr << "\n";
   CurInstr = &I;
+
+  // for omp inlining struct
+  if(inlinedArgNames.find(&I) != inlinedArgNames.end()){
+    Out << inlinedArgNames[&I];
+    return;
+  }
 
   // for omp inlining
   if(addressExposedLoads.find(&I) != addressExposedLoads.end())
