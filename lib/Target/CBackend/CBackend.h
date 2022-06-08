@@ -125,7 +125,6 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   //std::map<PHINode*, std::set<Value*>>phis2print;
   std::map<Value*, PHINode*>InstsToReplaceByPhi;
   std::map<Loop*, std::set<Instruction*>> omp_liveins;
-  std::map<Loop*, std::set<Instruction*>> omp_declaredLocals;
   std::map<Instruction*, Value*> deleteAndReplaceInsts;
   std::map<BranchInst*, int> deadBranches;
   bool omp_declarePrivate;
@@ -138,6 +137,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<Value*> UpperBoundArgs;
   std::set<Instruction*> addParenthesis;
   std::set<std::string> declaredLocals;
+  std::set<std::string> omp_declaredLocals;
 
   CBERegion *topRegion;
 

@@ -6836,9 +6836,14 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
       if(deadInsts.find(phi) != deadInsts.end()) continue;
       auto varName = GetValueName(phi);
       Out << std::string(2, ' ');
-      if(declaredLocals.find(varName) == declaredLocals.end()){
+      if(declaredLocals.find(varName) == declaredLocals.end()
+          && omp_declaredLocals.find(varName) == omp_declaredLocals.end()){
         printTypeName(Out, phi->getType(), false) << ' ';
-        declaredLocals.insert(varName);
+        errs() << "SUSAN: printing varname 6842: " << varName << "\n";
+        if(!IS_OPENMP_FUNCTION)
+          declaredLocals.insert(varName);
+        else
+          omp_declaredLocals.insert(varName);
       }
       Out << GetValueName(phi) << " = ";
       writeOperandInternal(phi->getIncomingValueForBlock(BB));
@@ -7023,31 +7028,31 @@ void CWriter::printLoopNew(Loop *L) {
       bool printPrivate = true;
       bool printComma = false;
       omp_declarePrivate=false;
-      for(auto inst : omp_declaredLocals[LP->L]){
-        omp_declarePrivate = true;
-        errs() << "SUSAN: printing local in private: " << *inst << "\n";
-        errs() << "LP->IV: " << LP->IV << "\n";
-        if(inst == LP->IV ||
-            (isIVIncrement(cast<Value>(inst)) &&
-            LI->getLoopFor(inst->getParent())==LP->L)){
-          printComma = false;
-          continue;
-        }
+      //for(auto inst : omp_declaredLocals[LP->L]){
+      //  omp_declarePrivate = true;
+      //  errs() << "SUSAN: printing local in private: " << *inst << "\n";
+      //  errs() << "LP->IV: " << LP->IV << "\n";
+      //  if(inst == LP->IV ||
+      //      (isIVIncrement(cast<Value>(inst)) &&
+      //      LI->getLoopFor(inst->getParent())==LP->L)){
+      //    printComma = false;
+      //    continue;
+      //  }
 
-        if(PHINode* phi = dyn_cast<PHINode>(inst)){
-          auto relatedIVs = IVMap[LP->IV];
-          if(relatedIVs.find(phi) != relatedIVs.end()) continue;
-        }
-        if(isExtraIVIncrement(inst)) continue;
+      //  if(PHINode* phi = dyn_cast<PHINode>(inst)){
+      //    auto relatedIVs = IVMap[LP->IV];
+      //    if(relatedIVs.find(phi) != relatedIVs.end()) continue;
+      //  }
+      //  if(isExtraIVIncrement(inst)) continue;
 
-        if(printComma) Out << ", ";
-        if(printPrivate){
-          printPrivate = false;
-          Out << " private( ";
-        }
-        writeOperand(cast<Value>(inst));
-        printComma = true;
-      }
+      //  if(printComma) Out << ", ";
+      //  if(printPrivate){
+      //    printPrivate = false;
+      //    Out << " private( ";
+      //  }
+      //  writeOperand(cast<Value>(inst));
+      //  printComma = true;
+      //}
 
       if(!printPrivate)
         Out << ")";
@@ -7299,9 +7304,14 @@ if( NATURAL_CONTROL_FLOW ){
       if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
         auto varName = GetValueName(&*II);
         //if (canDeclareLocalLate(*II)) {
-        if(declaredLocals.find(varName) == declaredLocals.end()){
+        if(declaredLocals.find(varName) == declaredLocals.end()
+          && omp_declaredLocals.find(varName) == omp_declaredLocals.end()){
           printTypeName(Out, II->getType(), false) << ' ';
-          declaredLocals.insert(varName);
+          errs() << "SUSAN: printing varname 7310: " << varName << "\n";
+          if(!IS_OPENMP_FUNCTION)
+            declaredLocals.insert(varName);
+          else
+            omp_declaredLocals.insert(varName);
         }
         Out << varName << " = ";
       }
@@ -9242,7 +9252,6 @@ void CWriter::visitCallInst(CallInst &I) {
       //1. save all the data that current function has
       auto IS_OPENMP_FUNCTION_SAVE = IS_OPENMP_FUNCTION;
       auto LoopProfiles_s = LoopProfiles;
-      auto omp_declaredLocals_s = omp_declaredLocals;
       auto omp_liveins_s = omp_liveins;
       auto omp_SkipVals_s = omp_SkipVals;
       auto deleteAndReplaceInsts_s = deleteAndReplaceInsts;
@@ -9291,16 +9300,8 @@ void CWriter::visitCallInst(CallInst &I) {
       printFloatingPointConstants(*utask);
       printFunction(*utask, true);
 
-
-      //recover data for current function
-      IS_OPENMP_FUNCTION = false;
-      for(auto [call, utask] : ompFuncs)
-        if(utask == I.getParent()->getParent())
-          IS_OPENMP_FUNCTION = true;
-
       IS_OPENMP_FUNCTION = IS_OPENMP_FUNCTION_SAVE;
       LoopProfiles = LoopProfiles_s;
-      omp_declaredLocals = omp_declaredLocals_s;
       omp_liveins = omp_liveins_s;
       omp_SkipVals = omp_SkipVals_s;
       deleteAndReplaceInsts = deleteAndReplaceInsts_s;
