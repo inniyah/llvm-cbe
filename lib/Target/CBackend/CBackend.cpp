@@ -3339,8 +3339,10 @@ void CWriter::writeOperandInternal(Value *Operand,
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
     errs() << "SUSAN: returning inlined name 3339: " << inlinedArgNames[Operand];
     if(valuesCast2Double.find(Operand) != valuesCast2Double.end())
-      Out << "(double*)";
+      Out << "((double*)";
     Out << inlinedArgNames[Operand];
+    if(valuesCast2Double.find(Operand) != valuesCast2Double.end())
+      Out << ")";
     return;
   }
 
@@ -10422,7 +10424,9 @@ void CWriter::visitLoadInst(LoadInst &I) {
     Out << inlinedArgNames[&I];
     if(valuesCast2Double.find(&I) != valuesCast2Double.end())
       Out << "((double*)";
-    errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I] << ")";
+    errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I];
+    if(valuesCast2Double.find(&I) != valuesCast2Double.end())
+      Out << ")";
     return;
   }
 
