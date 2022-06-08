@@ -9213,8 +9213,13 @@ void CWriter::visitCallInst(CallInst &I) {
             std::vector<Value*> argInputs, args;
             omp_findInlinedStructInputs(argInput, argInputs);
             omp_findCorrespondingUsesOfStruct(arg, args);
-            for(int i=0; i<args.size(); i++)
+            for(int i=0; i<args.size(); i++){
+              PointerType* ptrTy = dyn_cast<PointerType>(argInputs[i]->getType());
+              if(ptrTy && ptrTy->getPointerElementType()->isDoubleTy()
+                  && valuesCast2Double.find(args[i]) != valuesCast2Double.end())
+                valuesCast2Double.erase(args[i]);
               inlineNameForArg(argInputs[i], args[i]);
+            }
         } else {
             inlineNameForArg(argInput, arg);
         }
