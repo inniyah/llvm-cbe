@@ -8546,7 +8546,7 @@ void CWriter::visitCastInst(CastInst &I) {
     writeOperand(I.getOperand(0), ContextCasted);
     return;
   }
-  if(isa<ZExtInst>(&I) && isa<IntegerType>(DstTy) && isa<IntegerType>(SrcTy)){
+  if((isa<ZExtInst>(&I) || isa<SExtInst>(&I)) && isa<IntegerType>(DstTy) && isa<IntegerType>(SrcTy)){
     unsigned dstBits = cast<IntegerType>(DstTy)->getBitWidth();
     unsigned srcBits = cast<IntegerType>(SrcTy)->getBitWidth();
 
@@ -9116,6 +9116,7 @@ void CWriter::omp_findInlinedStructInputs(Value* argInput, std::vector<Value*> &
 }
 
 void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> &args){
+  errs() << "SUSAN: trying to find corresponding uses: " << *arg << "\n";
   for(auto U : arg->users()){
     Instruction* inst = dyn_cast<Instruction>(U);
     if(!inst) continue;
@@ -9154,6 +9155,22 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> 
   }
 }
 
+void CWriter::inlineNameForArg(Value* argInput, Value* arg){
+  if(ConstantInt* constant = dyn_cast<ConstantInt>(argInput)){
+    inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
+  } else {
+    auto argName = GetValueName(argInput);
+    if(declaredLocals.find(argName) == declaredLocals.end())
+      if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
+        printTypeName(Out, argInputInst->getType(), false) << ' ';
+        Out << GetValueName(argInputInst) << " = ";
+        writeInstComputationInline(*argInputInst);
+        Out << ";\n";
+      }
+    inlinedArgNames[arg] = argName;
+  }
+}
+
 void CWriter::visitCallInst(CallInst &I) {
   CurInstr = &I;
 
@@ -9189,42 +9206,15 @@ void CWriter::visitCallInst(CallInst &I) {
         }
 
         //unroll structs
-        if(PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType())){
-          if(isa<StructType>(ptrTy->getPointerElementType())){
+        PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
+        if(ptrTy && isa<StructType>(ptrTy->getPointerElementType())){
             std::vector<Value*> argInputs, args;
             omp_findInlinedStructInputs(argInput, argInputs);
             omp_findCorrespondingUsesOfStruct(arg, args);
-            for(int i=0; i<args.size(); i++){
-              auto arg = args[i];
-              auto argInput = argInputs[i];
-              auto argName = GetValueName(argInput);
-              if(declaredLocals.find(argName) == declaredLocals.end())
-                if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
-                  printTypeName(Out, argInputInst->getType(), false) << ' ';
-                  Out << GetValueName(argInputInst) << " = ";
-                  writeInstComputationInline(*argInputInst);
-                  Out << ";\n";
-                }
-              errs() << "SUSAN: argName" << argName << "\n";
-              errs() << "SUSAN: arg from struct: " << *arg << "\n";
-              inlinedArgNames[arg] = argName;
-            }
-            continue;
-          }
-        }
-
-        if(ConstantInt* constant = dyn_cast<ConstantInt>(argInput)){
-          inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
+            for(int i=0; i<args.size(); i++)
+              inlineNameForArg(argInputs[i], args[i]);
         } else {
-          auto argName = GetValueName(argInput);
-          if(declaredLocals.find(argName) == declaredLocals.end())
-            if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
-              printTypeName(Out, argInputInst->getType(), false) << ' ';
-              Out << GetValueName(argInputInst) << " = ";
-              writeInstComputationInline(*argInputInst);
-              Out << ";\n";
-            }
-          inlinedArgNames[arg] = argName;
+            inlineNameForArg(argInput, arg);
         }
       }
 
@@ -10431,8 +10421,8 @@ void CWriter::visitLoadInst(LoadInst &I) {
   if(inlinedArgNames.find(&I) != inlinedArgNames.end()){
     Out << inlinedArgNames[&I];
     if(valuesCast2Double.find(&I) != valuesCast2Double.end())
-      Out << "(double*)";
-    errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I];
+      Out << "((double*)";
+    errs() << "SUSAN: printing inlined name: " << inlinedArgNames[&I] << ")";
     return;
   }
 

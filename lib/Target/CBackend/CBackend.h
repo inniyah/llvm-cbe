@@ -415,6 +415,7 @@ private:
   bool RunAllAnalysis(Function &F);
   void omp_findInlinedStructInputs(Value* argInput, std::vector<Value*> &argInputs);
   void omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> &args);
+  void inlineNameForArg(Value* argInput, Value* arg);
 
 
   void writeOperandDeref(Value *Operand);
