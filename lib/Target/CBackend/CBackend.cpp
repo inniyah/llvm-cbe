@@ -7087,7 +7087,7 @@ void CWriter::printLoopNew(Loop *L) {
     //print init statement
 
     //print iv type
-    Out << "int ";
+    Out << "uint64_t ";
 
     errs() << "SUSAN: printing IV" << *LP->IV << "\n";
     Out << GetValueName(LP->IV) << " = ";
