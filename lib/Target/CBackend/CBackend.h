@@ -413,8 +413,8 @@ private:
   void preprocessInsts2AddParenthesis(Function &F);
   bool hasHigherOrderOps(Instruction* I, std::set<unsigned> higherOrderOpcodes);
   bool RunAllAnalysis(Function &F);
-  void omp_findInlinedStructInputs(Value* argInput, std::vector<Value*> &argInputs);
-  void omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> &args);
+  void omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs);
+  void omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args);
   void inlineNameForArg(Value* argInput, Value* arg);
 
 

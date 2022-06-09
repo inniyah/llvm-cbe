@@ -9093,41 +9093,44 @@ bool CWriter::RunAllAnalysis(Function &F){
    return Modified;
 }
 
-void CWriter::omp_findInlinedStructInputs(Value* argInput, std::vector<Value*> &argInputs){
+void CWriter::omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs){
   for(auto U : argInput->users()){
     GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(U);
     if(!gep) continue;
     ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(2));
-    //int idx = constint->getSExtValue();
-    //StructType *sourceElTy = dyn_cast<StructType>(gep->getSourceElementType());
-    //errs() << "SUSAN: sourceElTy: " << *sourceElTy << "\n";
-    //int newIdx = 0;
-    //for(int i=0; i<idx; i++){
-    //  Type* ty = sourceElTy->getElementType(i);
-    //  if(ty->isDoubleTy() || ty->isPointerTy())
-    //    newIdx += 8;
-    //  else if(IntegerType *intTy = dyn_cast<IntegerType>(ty))
-    //    newIdx += intTy->getBitWidth()/8;
-    //}
-    //errs() << "SUSAN: newIdx: " << newIdx << "\n";
+    int idx = constint->getSExtValue();
+    StructType *sourceElTy = dyn_cast<StructType>(gep->getSourceElementType());
+    errs() << "SUSAN: sourceElTy: " << *sourceElTy << "\n";
+    int newIdx = 0;
+    for(int i=0; i<idx; i++){
+      Type* ty = sourceElTy->getElementType(i);
+      if(ty->isDoubleTy() || ty->isPointerTy())
+        newIdx += 8;
+      else if(IntegerType *intTy = dyn_cast<IntegerType>(ty))
+        newIdx += intTy->getBitWidth()/8;
+
+      if(newIdx > 8 && newIdx%8 != 0)
+        newIdx = newIdx/8*8 + 8;
+    }
+    errs() << "SUSAN: newIdx: " << newIdx << "\n";
     for(auto storeU : gep->users()){
       if(StoreInst *store = dyn_cast<StoreInst>(storeU)){
         errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
-        argInputs.push_back(store->getOperand(0));
+        argInputs[newIdx] = store->getOperand(0);
       }
       else if(CastInst *cast = dyn_cast<CastInst>(storeU)){
         for(auto storeU : cast->users()){
           StoreInst *store = dyn_cast<StoreInst>(storeU);
           if(!store) continue;
           errs() << "SUSAN: found store for struct 9095: " << *store << "\n";
-          argInputs.push_back(store->getOperand(0));
+          argInputs[newIdx] = store->getOperand(0);
         }
       }
     }
   }
 }
 
-void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> &args){
+void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args){
   errs() << "SUSAN: trying to find corresponding uses: " << *arg << "\n";
   for(auto U : arg->users()){
     Instruction* inst = dyn_cast<Instruction>(U);
@@ -9136,12 +9139,13 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> 
       for(auto ldU : inst->users()){
         LoadInst* ld = dyn_cast<LoadInst>(ldU);
         if(!ld) continue;
-        args.push_back(ld);
+        args[0] = ld;
         errs() << "SUSAN: found load for struct 9084: 0" << *ld << "\n";
       }
     }
     if(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(inst)){
       ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(1));
+      auto argidx = constint->getSExtValue();
       for(auto castU : gep->users()){
         CastInst *cast = dyn_cast<CastInst>(castU);
         if(!cast) continue;
@@ -9149,7 +9153,9 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::vector<Value*> 
           LoadInst *ld = dyn_cast<LoadInst>(ldU);
 
           if(!ld) continue;
-          args.push_back(ld);
+          args[argidx] = ld;
+          errs() << "SUSAN: argidx: " << argidx << "\n";
+          errs() << "Load: " << *ld << "\n";
 
           if(PointerType *ptrTy = dyn_cast<PointerType>(cast->getDestTy()))
             if(ptrTy = dyn_cast<PointerType>(ptrTy->getPointerElementType()))
@@ -9220,15 +9226,16 @@ void CWriter::visitCallInst(CallInst &I) {
         //unroll structs
         PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
         if(ptrTy && isa<StructType>(ptrTy->getPointerElementType())){
-            std::vector<Value*> argInputs, args;
+            std::map<int, Value*> argInputs, args;
             omp_findInlinedStructInputs(argInput, argInputs);
             omp_findCorrespondingUsesOfStruct(arg, args);
-            for(int i=0; i<args.size(); i++){
-              PointerType* ptrTy = dyn_cast<PointerType>(argInputs[i]->getType());
+            for(auto [idx, arg] : args){
+              auto argInput = argInputs[idx];
+              PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
               if(ptrTy && ptrTy->getPointerElementType()->isDoubleTy()
-                  && valuesCast2Double.find(args[i]) != valuesCast2Double.end())
-                valuesCast2Double.erase(args[i]);
-              inlineNameForArg(argInputs[i], args[i]);
+                  && valuesCast2Double.find(arg) != valuesCast2Double.end())
+                valuesCast2Double.erase(arg);
+              inlineNameForArg(argInput, arg);
             }
         } else {
             inlineNameForArg(argInput, arg);
