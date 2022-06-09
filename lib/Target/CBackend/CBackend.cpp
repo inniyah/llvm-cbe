@@ -9094,39 +9094,50 @@ bool CWriter::RunAllAnalysis(Function &F){
 }
 
 void CWriter::omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs){
+  std::map<int, Value*>gep2argInput;
+  std::map<int, int>gep2typeWidth;
+  std::map<int, int>gep2Align;
   for(auto U : argInput->users()){
     GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(U);
     if(!gep) continue;
     ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(2));
     int idx = constint->getSExtValue();
     StructType *sourceElTy = dyn_cast<StructType>(gep->getSourceElementType());
-    errs() << "SUSAN: sourceElTy: " << *sourceElTy << "\n";
-    int newIdx = 0;
-    for(int i=0; i<idx; i++){
-      Type* ty = sourceElTy->getElementType(i);
-      if(ty->isDoubleTy() || ty->isPointerTy())
-        newIdx += 8;
-      else if(IntegerType *intTy = dyn_cast<IntegerType>(ty))
-        newIdx += intTy->getBitWidth()/8;
+    Type* ty = sourceElTy->getElementType(idx);
+    if(ty->isDoubleTy() || ty->isPointerTy())
+      gep2typeWidth[idx] = 8;
+    else if(IntegerType *intTy = dyn_cast<IntegerType>(ty))
+      gep2typeWidth[idx] = intTy->getBitWidth() / 8;
 
-      if(newIdx > 8 && newIdx%8 != 0)
-        newIdx = newIdx/8*8 + 8;
-    }
-    errs() << "SUSAN: newIdx: " << newIdx << "\n";
     for(auto storeU : gep->users()){
       if(StoreInst *store = dyn_cast<StoreInst>(storeU)){
         errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
-        argInputs[newIdx] = store->getOperand(0);
+        gep2argInput[idx] = store->getOperand(0);
+        gep2Align[idx] = store->getAlignment();
       }
       else if(CastInst *cast = dyn_cast<CastInst>(storeU)){
         for(auto storeU : cast->users()){
           StoreInst *store = dyn_cast<StoreInst>(storeU);
           if(!store) continue;
           errs() << "SUSAN: found store for struct 9095: " << *store << "\n";
-          argInputs[newIdx] = store->getOperand(0);
+          gep2argInput[idx] = store->getOperand(0);
+          gep2Align[idx] = store->getAlignment();
+          errs() << "SUSAN: aligment: " << store->getAlignment() << "\n";
         }
       }
     }
+  }
+
+  //figure out the stored location
+  int currentIdx = 0;
+  for(auto [idx, argInput] : gep2argInput){
+    errs() << "SUSAN: idx: " << idx << "\n";
+    if(currentIdx % gep2Align[idx])
+      currentIdx = (currentIdx / gep2Align[idx] + 1) * gep2Align[idx];
+
+    argInputs[currentIdx] = argInput;
+
+    currentIdx += gep2typeWidth[idx];
   }
 }
 
