@@ -138,6 +138,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<Instruction*> addParenthesis;
   std::set<std::string> declaredLocals;
   std::set<std::string> omp_declaredLocals;
+  std::map<Value*, std::string> IV2Name;
 
   CBERegion *topRegion;
 
@@ -416,6 +417,7 @@ private:
   void omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*> &argInputs);
   void omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args);
   void inlineNameForArg(Value* argInput, Value* arg);
+  void buildIVNames();
 
 
   void writeOperandDeref(Value *Operand);

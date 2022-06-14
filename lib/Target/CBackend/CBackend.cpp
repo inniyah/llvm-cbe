@@ -1643,6 +1643,22 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
   }
 }
 
+void CWriter::buildIVNames(){
+  std::list<Loop*> loops( LI->begin(), LI->end() );
+  while( !loops.empty() )
+  {
+    Loop *L = loops.front();
+    loops.pop_front();
+    Value* iv = getInductionVariable(L, SE);
+    char nestLevel = L->getLoopDepth() - 1;
+    char name[2] = {'i'+nestLevel, '\0'};
+    IV2Name[iv] = name;
+
+    loops.insert(loops.end(), L->getSubLoops().begin(),
+        L->getSubLoops().end());
+  }
+}
+
 bool CWriter::runOnModule(Module &M) {
   bool Modified = false;
   findOMPFunctions(M);
@@ -3227,6 +3243,11 @@ std::string demangleVariableName(StringRef var){
   return newVar;
 }
 std::string CWriter::GetValueName(Value *Operand) {
+  if(!Operand) return "";
+  if(isInductionVariable(Operand)){
+  if(IV2Name.find(Operand) != IV2Name.end())
+    return IV2Name[Operand];
+  }
   errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
@@ -9055,6 +9076,7 @@ bool CWriter::RunAllAnalysis(Function &F){
   LoopProfiles.clear();
   omp_declaredLocals.clear();
   omp_liveins.clear();
+  buildIVNames();
   if(IS_OPENMP_FUNCTION)
    omp_preprossesing(F);
   preprocessSkippableInsts(F);
@@ -9085,10 +9107,10 @@ bool CWriter::RunAllAnalysis(Function &F){
   collectVariables2Deref(F);
 
 
-   EliminateDeadInsts(F);
-   FindInductionVariableRelationships();
-   preprocessIVIncrements();
-   preprocessInsts2AddParenthesis(F);
+  EliminateDeadInsts(F);
+  FindInductionVariableRelationships();
+  preprocessIVIncrements();
+  preprocessInsts2AddParenthesis(F);
 
    return Modified;
 }
