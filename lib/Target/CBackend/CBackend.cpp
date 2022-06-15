@@ -9078,12 +9078,20 @@ bool CWriter::RunAllAnalysis(Function &F){
   preprocessSkippableBranches(F);
   PDT->recalculate(F);
   DT->recalculate(F);
+  SE = &getAnalysis<ScalarEvolutionWrapperPass>(F).getSE();
+  LI = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
   //SUSAN: determine whether the function can be compiled without gotos
   std::set<BasicBlock*> visitedBBs;
   markIfBranches(F, &visitedBBs); //2
   markBackEdges(F);
   determineControlFlowTranslationMethod(F);
 
+  for(auto LP : LoopProfiles){
+    if(LP->isOmpLoop) continue;
+    LP->IV = getInductionVariable(LP->L, SE);
+    LP->IVInc = getIVIncrement(LP->L, LP->IV);
+    LP->incr = LP->IVInc;
+  }
   //SUSAN: preprocessings
   //1. mark all the irregular exits of a loop (break/return)
   //2. find all the branches that can be expressed as if statement before split
