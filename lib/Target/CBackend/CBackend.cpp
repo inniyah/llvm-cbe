@@ -115,8 +115,8 @@ enum UnaryOps {
 #endif
 
 static bool changeMapValue(
-    std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap,
-    std::map<Instruction*, std::map<StringRef, Instruction*>> currMRVar2ValMap, Function &F){
+    std::map<Instruction*, std::map<std::string, Instruction*>> prevMRVar2ValMap,
+    std::map<Instruction*, std::map<std::string, Instruction*>> currMRVar2ValMap, Function &F){
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     auto prev =  prevMRVar2ValMap[&*I];
@@ -3222,19 +3222,23 @@ void CWriter::printConstantWithCast(Constant *CPV, unsigned Opcode) {
     printConstant(CPV, ContextCasted);
 }
 
-std::string demangleVariableName(StringRef var){
-  SmallVector<StringRef, 16> splitedStrs;
-  if(!var.contains(".")) return var;
+std::string demangleVariableName(std::string var){
+  SmallVector<std::string, 16> splitedStrs;
 
-  var.split(splitedStrs, ".");
-
-  std::string newVar = "";
-  for(auto str : splitedStrs){
-    if(str.empty()) continue;
-    newVar += "_";
-    newVar += str;
+  std::string VarName;
+  VarName.reserve(var.capacity());
+  for (std::string::iterator I = var.begin(), E = var.end(); I != E; ++I) {
+    unsigned char ch = *I;
+    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+          (ch >= '0' && ch <= '9') || ch == '_')) {
+      char buffer[5];
+      sprintf(buffer, "_%x_", ch);
+      VarName += buffer;
+    } else
+      VarName += ch;
   }
-  return newVar;
+
+  return VarName;
 }
 std::string CWriter::GetValueName(Value *Operand) {
   if(!Operand) return "";
@@ -3242,15 +3246,17 @@ std::string CWriter::GetValueName(Value *Operand) {
     return IV2Name[Operand];
   errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
-  if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
-    return GetValueName(InstsToReplaceByPhi[Operand]);
+  if(TruncInst *inst = dyn_cast<TruncInst>(Operand))
+    return GetValueName(inst->getOperand(0));
+
+ // if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
+ //   return GetValueName(InstsToReplaceByPhi[Operand]);
 
   if(Instruction* inst = dyn_cast<Instruction>(Operand))
     if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end())
       return GetValueName(deleteAndReplaceInsts[inst]);
 
-  if(TruncInst *inst = dyn_cast<TruncInst>(Operand))
-    return GetValueName(inst->getOperand(0));
+
 
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end())
     return inlinedArgNames[Operand];
@@ -3259,7 +3265,10 @@ std::string CWriter::GetValueName(Value *Operand) {
   Instruction *operandInst = dyn_cast<Instruction>(Operand);
   for(auto inst2var : IRNaming)
     if(inst2var.first == operandInst){
+      errs() << "inst from IRNaming: " << *inst2var.first << "\n";
+      errs() << "original name : " << inst2var.second << "\n";
       std::string var = demangleVariableName(inst2var.second);
+      errs() << "returning name: " << var << "\n";
       return var;
     }
   //for (auto const& [var, insts] : Var2IRs)
@@ -3273,9 +3282,9 @@ std::string CWriter::GetValueName(Value *Operand) {
   }
 
   // use IV name for IVInc
-  Instruction *incInst = dyn_cast<Instruction>(Operand);
-  if(IVInc2IV.find(incInst) != IVInc2IV.end())
-    return GetValueName(IVInc2IV[incInst]);
+  //Instruction *incInst = dyn_cast<Instruction>(Operand);
+  //if(IVInc2IV.find(incInst) != IVInc2IV.end())
+  //  return GetValueName(IVInc2IV[incInst]);
 
   std::string Name{Operand->getName()};
   if (Name.empty()) { // Assign unique names to local temporaries.
@@ -3447,10 +3456,10 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
     Out << inlinedArgNames[Operand];
     return;
   }
-  if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
-    writeOperand(InstsToReplaceByPhi[Operand]);
-    return;
-  }
+  //if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end()){
+  //  writeOperand(InstsToReplaceByPhi[Operand]);
+  //  return;
+  //}
 
   Instruction *inst = dyn_cast<Instruction>(Operand);
   if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
@@ -6130,8 +6139,8 @@ void CWriter::printFunction(Function &F, bool inlineF) {
   bool PrintedVar = false;
 
   //SUSAN: build a variable - IR table
-  std::map<Instruction*, std::set<StringRef>>IR2vars;
-  std::map<StringRef,std::set<Instruction*>>Var2IRs;
+  std::map<Instruction*, std::set<std::string>>IR2vars;
+  std::map<std::string,std::set<Instruction*>>Var2IRs;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     if(CallInst* CI = dyn_cast<CallInst>(&*I)){
       if(Function *F = CI->getCalledFunction()){
@@ -6140,7 +6149,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
             Metadata *varMeta = cast<MetadataAsValue>(CI->getOperand(1))->getMetadata();
             DILocalVariable *var = dyn_cast<DILocalVariable>(varMeta);
             assert(var && "SUSAN: 2nd argument of llvm.dbg.value is not DILocalVariable?\n");
-            StringRef varName = var->getName();
+            std::string varName = var->getName().str();
             if (isa<ValueAsMetadata>(valMeta)){
               Value *valV = cast<ValueAsMetadata>(valMeta)->getValue();
               if (Instruction *valInst = dyn_cast<Instruction>(valV)){
@@ -6159,7 +6168,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
 
                 // build IR -> Vars table
                 if( IR2vars.find(valInst) == IR2vars.end() )
-                  IR2vars[valInst] = std::set<StringRef>();
+                  IR2vars[valInst] = std::set<std::string>();
                 IR2vars[valInst].insert(varName);
 
                 //try: build just IRNaming
@@ -6171,49 +6180,62 @@ void CWriter::printFunction(Function &F, bool inlineF) {
       }
     }
   }
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    if(PHINode *phi = dyn_cast<PHINode>(&*I)){
+    auto name = GetValueName(phi);
+    for(auto ins2var : IRNaming)
+      if(ins2var.first == phi)
+        name = ins2var.second;
+
+    errs() << "SUSAN: phi related name: " << name << "\n";
+    for(unsigned i=0; i<phi->getNumIncomingValues(); ++i)
+      if(Instruction *incomingInst = dyn_cast<Instruction>(phi->getIncomingValue(i)))
+        IRNaming.insert(std::make_pair(incomingInst, name));
+    }
+  }
 
   errs() << "=========================SUSAN: IR NAMING BEFORE=====================\n";
   for(auto inst2var : IRNaming){
     errs() << *inst2var.first << " -> " << inst2var.second << "\n";
   }
 
-  std::map<Instruction*, std::map<StringRef, Instruction*>> MRVar2ValMap;
-  std::set<StringRef> vars2record;
+  std::map<Instruction*, std::map<std::string, Instruction*>> MRVar2ValMap;
+  std::set<std::string> vars2record;
   for(auto inst2var : IRNaming){
     vars2record.insert(inst2var.second);
   }
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction *currInst = &*I;
-    std::map<StringRef, Instruction*> var2val;
+    std::map<std::string, Instruction*> var2val;
     for(auto & var2record : vars2record)
       var2val[var2record] = nullptr;
     MRVar2ValMap[currInst] = var2val;
   }
 
   // build the MRVar2ValMap
-  std::map<Instruction*, std::map<StringRef, Instruction*>> prevMRVar2ValMap, currMRVar2ValMap;
+  std::map<Instruction*, std::map<std::string, Instruction*>> prevMRVar2ValMap, currMRVar2ValMap;
   do{
     prevMRVar2ValMap = MRVar2ValMap;
     for (auto &BB : F){
-      std::map<StringRef, Instruction*> prev_var2val;
+      std::map<std::string, Instruction*> prev_var2val;
       for (auto &I : BB) {
         Instruction *currInst = &I;
-        std::map<StringRef, Instruction*> curr_var2val = MRVar2ValMap[currInst];
+        auto curr_var2val = MRVar2ValMap[currInst];
 
-        std::set<StringRef> vars2gen;
+        std::set<std::string> vars2gen;
         for(auto inst2var : IRNaming)
           if(currInst == inst2var.first)
             vars2gen.insert(inst2var.second);
 
-        std::map<StringRef, Instruction*> merged_var2val;
-        std::map<StringRef, Instruction*> prev_pred_var2val;
+        std::map<std::string, Instruction*> merged_var2val;
+        std::map<std::string, Instruction*> prev_pred_var2val;
         if(prev_var2val.empty()){
           for (pred_iterator PI = pred_begin(&BB),
                E = pred_end(&BB); PI != E; ++PI){
             BasicBlock *pred = *PI;
             Instruction *term = pred->getTerminator();
-            std::map<StringRef, Instruction*> term_var2val = MRVar2ValMap[term];
+            std::map<std::string, Instruction*> term_var2val = MRVar2ValMap[term];
             for(auto &[var, val] : term_var2val)
               if(val)
                 curr_var2val[var] = val;
@@ -6255,8 +6277,9 @@ void CWriter::printFunction(Function &F, bool inlineF) {
   // find the contradicting cases and delete them in Var2IRs table
   // Contradicting: if at any instruction I1, it uses I2, but I2 has two coressponding
   // variable v1 and v2, however only v2 has value I2 at this point, then the v1 -> I2 mapping needs to be deleted
-  std::vector<std::pair<Instruction*, StringRef>> instVarPair2Delete;
-  for(auto &[inst, var2val]: MRVar2ValMap)
+  std::vector<std::pair<Instruction*, std::string>> instVarPair2Delete;
+  for(auto &[inst, var2val]: MRVar2ValMap){
+    if(isa<PHINode>(inst)) continue;
     for (unsigned i = 0, e = inst->getNumOperands(); i != e; ++i)
       if(Instruction *operand = dyn_cast<Instruction>(inst->getOperand(i)))
         for(auto &[var, valAtOperand] : var2val)
@@ -6269,6 +6292,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
                   Var2IRs[var2erase].erase(operand);
                   for (auto inst2var : IRNaming)
                     if(inst2var.first == operand && inst2var.second == var2erase){
+                      errs() << "SUSAN: at inst " << *inst << "\n";
                       errs() << "SUSAN: removinginst2var at 6152: " << *(inst2var.first) << " -> " << inst2var.second << "\n";
                       instVarPair2Delete.push_back(inst2var);
                     }
@@ -6276,10 +6300,11 @@ void CWriter::printFunction(Function &F, bool inlineF) {
               }
             }
 
-            IR2vars[operand] = std::set<StringRef>();
+            IR2vars[operand] = std::set<std::string>();
             IR2vars[operand].insert(var);
             IRNaming.insert(std::make_pair(operand, var));
           }
+  }
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction* inst = &*I;
@@ -6295,7 +6320,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
                 && operand != MRVar2Vals[var] && MRVar2Vals[var] != inst){
                 //Note: if it's IV, we know how to handle it and doesn't need to be deleted
                 //Note: if one of them is alloca, it should be fine
-                if(isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var])){
+                if(operand && MRVar2Vals[var] && (isa<AllocaInst>(operand) || isa<AllocaInst>(MRVar2Vals[var]))){
                   //if(isa<AllocaInst>(operand) && MRVar2Vals[var])
                   //  allocaTypeChange[operand] = MRVar2Vals[var]->getType();
                   //else if(isa<AllocaInst>(MRVar2Vals[var]) && operand)
@@ -6305,13 +6330,13 @@ void CWriter::printFunction(Function &F, bool inlineF) {
                   //declaredLocals.insert(GetValueName(operand));
                   continue;
                 }
-                if(!isInductionVariable(operand) && !isIVIncrement(operand)){
-                  for(auto pair : IRNaming)
-                    if(pair.first == operand && pair.second == var){
-                      errs() << "SUSAN: removinginst2var at 6180: " << *operand << " -> " << var << "\n";
-                      instVarPair2Delete.push_back(pair);
-                    }
-                }
+                //if(!isInductionVariable(operand) && !isIVIncrement(operand)){
+                //  for(auto pair : IRNaming)
+                //    //if(pair.first == operand && pair.second == var){
+                //    //  errs() << "SUSAN: removinginst2var at 6180: " << *operand << " -> " << var << "\n";
+                //      instVarPair2Delete.push_back(pair);
+                //    }
+                //}
 
                 if(!isInductionVariable(MRVar2Vals[var]) && !isIVIncrement(MRVar2Vals[var])){
                   for(auto pair : IRNaming)
@@ -6344,7 +6369,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
     findSignedInsts(inst, inst);
   }
   //if signedInsts have corresponding variable, then that variable is signed
-  std::set<StringRef> signedVars;
+  std::set<std::string> signedVars;
   for(auto signedInst : signedInsts)
     for(auto inst2var : IRNaming)
       if(inst2var.first == signedInst)
@@ -9067,6 +9092,7 @@ bool CWriter::RunAllAnalysis(Function &F){
    * OpenMP: preprosessings
    */
   LoopProfiles.clear();
+  IRNaming.clear();
   omp_declaredLocals.clear();
   //declaredLocals.clear();
   omp_liveins.clear();

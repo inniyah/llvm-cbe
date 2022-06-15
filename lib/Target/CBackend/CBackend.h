@@ -91,8 +91,8 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<Value*> valuesCast2Double;
 
   // SUSAN: tables for variable preservation
-  std::set<std::pair<Instruction*, StringRef>> IRNaming;
-  std::set<StringRef>allVars, phiVars;
+  std::set<std::pair<Instruction*, std::string>> IRNaming;
+  std::set<std::string>allVars, phiVars;
   //std::set<BasicBlock*>printedBBs;
   std::map<BasicBlock*, int> times2bePrinted;
   //std::set<BasicBlock*> splittedBBs;
