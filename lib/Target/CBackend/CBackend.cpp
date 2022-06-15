@@ -1644,18 +1644,12 @@ void CWriter::preprocessInsts2AddParenthesis(Function &F){
 }
 
 void CWriter::buildIVNames(){
-  std::list<Loop*> loops( LI->begin(), LI->end() );
-  while( !loops.empty() )
-  {
-    Loop *L = loops.front();
-    loops.pop_front();
-    Value* iv = getInductionVariable(L, SE);
-    char nestLevel = L->getLoopDepth() - 1;
+  for(auto LP : LoopProfiles){
+    char nestLevel = LP->L->getLoopDepth() - 1;
     char name[2] = {'i'+nestLevel, '\0'};
-    IV2Name[iv] = name;
+    IV2Name[LP->IV] = name;
+    IV2Name[LP->IVInc] = name;
 
-    loops.insert(loops.end(), L->getSubLoops().begin(),
-        L->getSubLoops().end());
   }
 }
 
@@ -3244,10 +3238,8 @@ std::string demangleVariableName(StringRef var){
 }
 std::string CWriter::GetValueName(Value *Operand) {
   if(!Operand) return "";
-  if(isInductionVariable(Operand)){
   if(IV2Name.find(Operand) != IV2Name.end())
     return IV2Name[Operand];
-  }
   errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
   if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
@@ -6310,6 +6302,7 @@ void CWriter::printFunction(Function &F, bool inlineF) {
                   //  allocaTypeChange[MRVar2Vals[var]] = operand->getType();
 
                   errs() << "SUSAN: inst at 6227: " << *inst << "\n";
+                  //declaredLocals.insert(GetValueName(operand));
                   continue;
                 }
                 if(!isInductionVariable(operand) && !isIVIncrement(operand)){
@@ -7140,7 +7133,7 @@ void CWriter::printLoopNew(Loop *L) {
       if(condInst->getOperand(0) == LP->IV
           || condInst->getOperand(1) == LP->IV)
       Out << "(";
-      writeOperandInternal(LP->ub);
+      writeOperandInternal(condInst->getOperand(1));
       if(condInst->getOperand(0) == LP->IV
           || condInst->getOperand(1) == LP->IV)
       Out << " + 1)";
@@ -9075,8 +9068,8 @@ bool CWriter::RunAllAnalysis(Function &F){
    */
   LoopProfiles.clear();
   omp_declaredLocals.clear();
+  //declaredLocals.clear();
   omp_liveins.clear();
-  buildIVNames();
   if(IS_OPENMP_FUNCTION)
    omp_preprossesing(F);
   preprocessSkippableInsts(F);
@@ -9111,6 +9104,7 @@ bool CWriter::RunAllAnalysis(Function &F){
   FindInductionVariableRelationships();
   preprocessIVIncrements();
   preprocessInsts2AddParenthesis(F);
+  buildIVNames();
 
    return Modified;
 }
@@ -9207,17 +9201,25 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*
 }
 
 void CWriter::inlineNameForArg(Value* argInput, Value* arg){
+  auto argName = GetValueName(argInput);
+
+
   if(ConstantInt* constant = dyn_cast<ConstantInt>(argInput)){
     inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
-  } else {
-    auto argName = GetValueName(argInput);
-    if(declaredLocals.find(argName) == declaredLocals.end())
+  } else if(declaredLocals.find(argName) == declaredLocals.end()){
       if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
-        printTypeName(Out, argInputInst->getType(), false) << ' ';
-        Out << GetValueName(argInputInst) << " = ";
-        writeInstComputationInline(*argInputInst);
-        Out << ";\n";
+          if(!isa<CastInst>(argInputInst)){
+            errs() << "SUSAN: inlining argInput: " << *argInput << "\n";
+            errs() << "SUSAN: inlining arg: " << *arg << "\n";
+            printTypeName(Out, argInputInst->getType(), false) << ' ';
+            Out << GetValueName(argInputInst) << " = ";
+            writeInstComputationInline(*argInputInst);
+            Out << ";\n";
+          }
       }
+    inlinedArgNames[arg] = argName;
+  }
+  else{
     inlinedArgNames[arg] = argName;
   }
 }
