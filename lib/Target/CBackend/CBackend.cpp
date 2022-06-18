@@ -7199,7 +7199,11 @@ void CWriter::printLoopNew(Loop *L) {
       errs() << "SUSAN: condInst:" << *condInst << "\n";
 
       Out << GetValueName(condInst->getOperand(0));
-      printCmpOperator(dyn_cast<ICmpInst>(condInst), negateCondition);
+      if(ICmpInst *icmp = dyn_cast<ICmpInst>(condInst)){
+        if(!negateCondition && icmp->getPredicate() == ICmpInst::ICMP_NE)
+          Out << " < ";
+        else printCmpOperator(icmp, negateCondition);
+      }
 
       if(condInst->getOperand(0) == LP->IV
           || condInst->getOperand(1) == LP->IV)
