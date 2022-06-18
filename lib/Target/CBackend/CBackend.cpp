@@ -7404,7 +7404,7 @@ if( NATURAL_CONTROL_FLOW ){
       if (!isEmptyType(II->getType()) || isa<StoreInst>(&*II))
         Out << "  ";
 
-      if (!isEmptyType(II->getType()) && !isInlineAsm(*II)) {
+      if ((&*II)->user_begin() != (&*II)->user_end() && !isEmptyType(II->getType()) && !isInlineAsm(*II)) {
         auto varName = GetValueName(&*II);
         //if (canDeclareLocalLate(*II)) {
         if(declaredLocals.find(varName) == declaredLocals.end()
