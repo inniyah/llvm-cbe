@@ -9596,7 +9596,11 @@ void CWriter::visitCallInst(CallInst &I) {
       writeOperand(*AI, ContextCasted);
     PrintedArg = true;
   }
-  Out << ");\n";
+  if(isEmptyType(I.getType()))
+    Out << ");\n";
+  else
+    Out << ")";
+
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
