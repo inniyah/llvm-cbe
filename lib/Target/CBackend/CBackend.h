@@ -418,6 +418,7 @@ private:
   void omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*> &args);
   void inlineNameForArg(Value* argInput, Value* arg);
   void buildIVNames();
+  void buildInlinedArgsTable(Function &F);
 
 
   void writeOperandDeref(Value *Operand);

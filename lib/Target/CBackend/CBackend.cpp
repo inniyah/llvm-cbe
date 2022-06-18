@@ -1113,6 +1113,12 @@ Value* CWriter::findOriginalValue(Value *val){
 
   Value *newVal = val;
 
+  if(isa<AllocaInst>(val))
+    for(auto user : val->users())
+      if(StoreInst *store = dyn_cast<StoreInst>(user))
+        if(store->getPointerOperand() == val)
+          newVal = store->getOperand(0);
+
   while(isa<CastInst>(newVal) || isa<LoadInst>(newVal) ||
       (isa<PHINode>(newVal) && !isInductionVariable(newVal) && !isExtraInductionVariable(newVal))){
     Instruction *currInst = cast<Instruction>(newVal);
@@ -4149,6 +4155,44 @@ void CWriter::findOMPFunctions(Module &M){
       }
     }
   }
+
+  //delete argInput in a struct
+  for(auto [callInst, utask] : ompFuncs){
+    int numArgs = std::distance(utask->arg_begin(), utask->arg_end())-2;
+    for(auto idx = 3; idx < numArgs+3; ++idx) {
+      Value *argInput = callInst->getArgOperand(idx);
+      errs() << "SUSAN: argInput 4158: " << *argInput << "\n";
+      PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
+      if(ptrTy && isa<StructType>(ptrTy->getPointerElementType())){
+        for(auto U : argInput->users()){
+          GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(U);
+          if(!gep) continue;
+          ConstantInt *constint = dyn_cast<ConstantInt>(gep->getOperand(2));
+
+          for(auto storeU : gep->users()){
+            if(StoreInst *store = dyn_cast<StoreInst>(storeU)){
+              errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
+              if(isa<AllocaInst>(store->getOperand(0)))
+                for(auto user : store->getOperand(0)->users())
+                  if(StoreInst *storeAlloca = dyn_cast<StoreInst>(user))
+                    if(storeAlloca->getPointerOperand() == store->getOperand(0))
+                      deadInsts.insert(storeAlloca);
+              deadInsts.insert(store);
+            }
+            else if(CastInst *cast = dyn_cast<CastInst>(storeU)){
+              for(auto storeU : cast->users()){
+                StoreInst *store = dyn_cast<StoreInst>(storeU);
+                if(!store) continue;
+                errs() << "SUSAN: found store for struct 9095: " << *store << "\n";
+                deadInsts.insert(store);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
 }
 
 void CWriter::generateHeader(Module &M) {
@@ -6387,6 +6431,8 @@ void CWriter::printFunction(Function &F, bool inlineF) {
        //if(InstsToReplaceByPhi.find(&*I) == InstsToReplaceByPhi.end()){
        if(InstsToReplaceByPhi.find(&*I) != InstsToReplaceByPhi.end()) continue;
        if(deadInsts.find(&*I) != deadInsts.end()) continue;
+       if(isSkipableInst(&*I)) continue;
+         continue;
        errs() << "SUSAN: declaring local: " << *I << "\n";
        DeclareLocalVariable(&*I, PrintedVar, isDeclared, declaredLocals);
        //}
@@ -9162,7 +9208,9 @@ void CWriter::omp_findInlinedStructInputs(Value* argInput, std::map<int, Value*>
     for(auto storeU : gep->users()){
       if(StoreInst *store = dyn_cast<StoreInst>(storeU)){
         errs() << "SUSAN: found store for struct 9066: " << *store << "\n";
-        gep2argInput[idx] = store->getOperand(0);
+        auto originalVal = findOriginalValue(store->getOperand(0));
+        errs() << "SUSAN: original Val: " << *originalVal;
+        gep2argInput[idx] = originalVal;
         gep2Align[idx] = store->getAlignment();
       }
       else if(CastInst *cast = dyn_cast<CastInst>(storeU)){
@@ -9218,10 +9266,13 @@ void CWriter::omp_findCorrespondingUsesOfStruct(Value* arg, std::map<int, Value*
           errs() << "SUSAN: argidx: " << argidx << "\n";
           errs() << "Load: " << *ld << "\n";
 
-          if(PointerType *ptrTy = dyn_cast<PointerType>(cast->getDestTy()))
-            if(ptrTy = dyn_cast<PointerType>(ptrTy->getPointerElementType()))
-              if(ptrTy->getPointerElementType()->isDoubleTy())
+          if(PointerType *ptrTy = dyn_cast<PointerType>(cast->getDestTy())){
+            if(PointerType *elPtrTy =
+                dyn_cast<PointerType>(ptrTy->getPointerElementType())){
+              if(elPtrTy->getPointerElementType()->isDoubleTy())
                 valuesCast2Double.insert(ld);
+            }
+          }
 
           for(auto ldValU : ld->users()){
             LoadInst *ldVal = dyn_cast<LoadInst>(ldValU);
@@ -9240,6 +9291,9 @@ void CWriter::inlineNameForArg(Value* argInput, Value* arg){
 
   if(ConstantInt* constant = dyn_cast<ConstantInt>(argInput)){
     inlinedArgNames[arg] = std::to_string(constant->getSExtValue()) ;
+  }
+  else if(ConstantFP* constant = dyn_cast<ConstantFP>(argInput)){
+    inlinedArgNames[arg] = ftostr(constant->getValueAPF()) ;
   } else if(declaredLocals.find(argName) == declaredLocals.end()){
       if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
           if(!isa<CastInst>(argInputInst)){
@@ -9301,9 +9355,12 @@ void CWriter::visitCallInst(CallInst &I) {
             for(auto [idx, arg] : args){
               auto argInput = argInputs[idx];
               PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
+              if(!ptrTy)
+                valuesCast2Double.erase(arg);
               if(ptrTy && ptrTy->getPointerElementType()->isDoubleTy()
                   && valuesCast2Double.find(arg) != valuesCast2Double.end())
                 valuesCast2Double.erase(arg);
+
               inlineNameForArg(argInput, arg);
             }
         } else {
