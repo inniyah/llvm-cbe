@@ -85,6 +85,10 @@ public:
 /// module to a C translation unit.
 class CWriter : public ModulePass, public InstVisitor<CWriter> {
 
+  //SUSAN: counters
+  int cnt_totalVariables;
+  int cnt_reconstructedVariables;
+
   //SUSAN: tables not need to be saved when inlining
   std::map<Value*, std::string> inlinedArgNames;
   std::set<LoadInst*> addressExposedLoads;
@@ -530,7 +534,7 @@ private:
   bool printGEPExpressionStruct(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory = false, bool printReference = false);
   void printGEPExpressionArray(Value *Ptr, gep_type_iterator I, gep_type_iterator E, bool accessMemory=false);
 
-  std::string GetValueName(Value *Operand);
+  std::string GetValueName(Value *Operand, bool isDeclaration=false);
 
   friend class CWriterTestHelper;
 };

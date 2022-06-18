@@ -1660,6 +1660,8 @@ void CWriter::buildIVNames(){
 }
 
 bool CWriter::runOnModule(Module &M) {
+  cnt_totalVariables = 0;
+  cnt_reconstructedVariables = 0;
   bool Modified = false;
   findOMPFunctions(M);
   for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI) {
@@ -1691,6 +1693,8 @@ bool CWriter::runOnModule(Module &M) {
     LI = nullptr;
     PDT = nullptr;
   }
+  errs() << "TOTAL VARIABLES: " << cnt_totalVariables << "\n";
+  errs() << "RECONSTRUCTED VARIABLES: " << cnt_reconstructedVariables << "\n";
   return Modified;
 }
 
@@ -3246,7 +3250,12 @@ std::string demangleVariableName(std::string var){
 
   return VarName;
 }
-std::string CWriter::GetValueName(Value *Operand) {
+std::string CWriter::GetValueName(Value *Operand, bool isDeclaration) {
+  if(isDeclaration){
+    errs() << "SUSAN: declaring 3252: " << *Operand << "\n";
+    cnt_totalVariables++;
+  }
+
   if(!Operand) return "";
   if(IV2Name.find(Operand) != IV2Name.end())
     return IV2Name[Operand];
@@ -3275,6 +3284,10 @@ std::string CWriter::GetValueName(Value *Operand) {
       errs() << "original name : " << inst2var.second << "\n";
       std::string var = demangleVariableName(inst2var.second);
       errs() << "returning name: " << var << "\n";
+      if(isDeclaration){
+        errs() << "SUSAN: declaring with reconstructed name 3286: " << var << "\n";
+        cnt_reconstructedVariables++;
+      }
       return var;
     }
   //for (auto const& [var, insts] : Var2IRs)
@@ -5985,7 +5998,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
                                    std::set<std::string> &declaredLocals){
 
    if (AllocaInst *AI = isDirectAlloca(I)) {
-     auto varName = GetValueName(AI);
+     auto varName = GetValueName(AI, true);
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
      declaredLocals.insert(varName);
      errs() << "SUSAN: declaring varName 5264: " << varName << "\n";
@@ -6045,7 +6058,7 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
     for(auto local : declaredLocals)
       errs() << local << "\n";
      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
-       auto varName = GetValueName(I);
+       auto varName = GetValueName(I, true);
        if(declaredLocals.find(varName) != declaredLocals.end()) return;
        declaredLocals.insert(varName);
 
@@ -6692,7 +6705,7 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
       if (canDeclareLocalLate(*I)) {
         printTypeName(Out, I->getType(), false) << ' ';
       }
-      Out << GetValueName(&*I) << " = ";
+      Out << GetValueName(&*I, true) << " = ";
     }
     writeInstComputationInline(*I);
 
@@ -6923,6 +6936,7 @@ void CWriter::printPHIsIfNecessary(BasicBlock *BB){
       Out << std::string(2, ' ');
       if(declaredLocals.find(varName) == declaredLocals.end()
           && omp_declaredLocals.find(varName) == omp_declaredLocals.end()){
+        auto varName = GetValueName(phi, true);
         printTypeName(Out, phi->getType(), false) << ' ';
         errs() << "SUSAN: printing varname 6842: " << varName << "\n";
         if(!IS_OPENMP_FUNCTION)
@@ -7395,6 +7409,7 @@ if( NATURAL_CONTROL_FLOW ){
         //if (canDeclareLocalLate(*II)) {
         if(declaredLocals.find(varName) == declaredLocals.end()
           && omp_declaredLocals.find(varName) == omp_declaredLocals.end()){
+          auto varName = GetValueName(&*II, true);
           printTypeName(Out, II->getType(), false) << ' ';
           errs() << "SUSAN: printing varname 7310: " << varName << "\n";
           if(!IS_OPENMP_FUNCTION)
@@ -9304,7 +9319,7 @@ void CWriter::inlineNameForArg(Value* argInput, Value* arg){
             errs() << "SUSAN: inlining argInput: " << *argInput << "\n";
             errs() << "SUSAN: inlining arg: " << *arg << "\n";
             printTypeName(Out, argInputInst->getType(), false) << ' ';
-            Out << GetValueName(argInputInst) << " = ";
+            Out << GetValueName(argInputInst,true) << " = ";
             writeInstComputationInline(*argInputInst);
             Out << ";\n";
           }
