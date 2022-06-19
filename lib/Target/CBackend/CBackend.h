@@ -143,6 +143,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<std::string> declaredLocals;
   std::set<std::string> omp_declaredLocals;
   std::map<Value*, std::string> IV2Name;
+  std::set<Instruction*> notInlinableBinOps;
 
   CBERegion *topRegion;
 
@@ -423,6 +424,7 @@ private:
   void inlineNameForArg(Value* argInput, Value* arg);
   void buildIVNames();
   void buildInlinedArgsTable(Function &F);
+  void collectNotInlinableBinOps(Function &F);
 
 
   void writeOperandDeref(Value *Operand);

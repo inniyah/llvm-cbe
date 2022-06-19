@@ -186,6 +186,9 @@ bool CWriter::isInlinableInst(Instruction &I) const {
   if (isa<LoadInst>(I) || isa<CmpInst>(I) || isa<GetElementPtrInst>(I) || isa<CastInst>(I))
     return true;
 
+  if(isa<BinaryOperator>(&I) && notInlinableBinOps.find(&I) == notInlinableBinOps.end())
+    return true;
+
   //exit condition can be inlined
   if(isa<CallInst>(I) && loopCondCalls.find(dyn_cast<CallInst>(&I)) != loopCondCalls.end())
     return true;
@@ -943,7 +946,14 @@ void CWriter::preprossesPHIs2Print(Function &F){
         BasicBlock *predBB = phi->getIncomingBlock(i);
         Value *phiVal = phi->getIncomingValue(i);
         if(isa<Constant>(phiVal) || isa<LoadInst>(phiVal)){
-          PHIValues2Print.insert(std::make_pair(predBB, phi));
+          bool skipStderr = false;
+          if(LoadInst* ld = dyn_cast<LoadInst>(phiVal))
+            if(ld->getPointerOperand()->getName() == "stderr"){
+              skipStderr = true;
+              IRNaming.insert(std::make_pair(ld, "stderr"));
+            }
+          if(!skipStderr)
+            PHIValues2Print.insert(std::make_pair(predBB, phi));
         }
 
         if(PHINode *incomingPhi = dyn_cast<PHINode>(phiVal)){
@@ -1368,17 +1378,25 @@ void CWriter::preprocessSkippableInsts(Function &F){
     if(opcode != Instruction::And) continue;
 
     if(ConstantInt *consInt = dyn_cast<ConstantInt>(binop->getOperand(0)))
-      if(consInt->getZExtValue() == 4294967295){
+      if(consInt->getZExtValue() == 4294967295 || consInt->getZExtValue() == 34359738360){
         deleteAndReplaceInsts[&*I] = binop->getOperand(1);
         continue;
       }
 
     if(ConstantInt *consInt = dyn_cast<ConstantInt>(binop->getOperand(1))){
-      if(consInt->getZExtValue() == 4294967295){
+      if(consInt->getZExtValue() == 4294967295 || consInt->getZExtValue() == 34359738360){
         errs() << "SUSAN: resgitering deleteAndReplaceInsts: " << *I << "\n";
         deleteAndReplaceInsts[&*I] = binop->getOperand(0);
         continue;
       }
+    }
+  }
+  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+    LoadInst *ld = dyn_cast<LoadInst>(&*I);
+    if(!ld) continue;
+    if(ld->getPointerOperand()->getName() == "stderr"){
+      errs() << "SUSAN: added stderr to delete insts\n";
+      deleteAndReplaceInsts[&*I] = ld->getPointerOperand();
     }
   }
 }
@@ -1657,6 +1675,18 @@ void CWriter::buildIVNames(){
     IV2Name[LP->IVInc] = name;
 
   }
+}
+
+void CWriter::collectNotInlinableBinOps(Function &F){
+    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
+      PHINode *phi = dyn_cast<PHINode>(&*I);
+      if(!phi) continue;
+      for(unsigned i=0; i<phi->getNumIncomingValues(); ++i){
+        BinaryOperator *incomingI = dyn_cast<BinaryOperator>(phi->getIncomingValue(i));
+        if(incomingI)
+          notInlinableBinOps.insert(incomingI);
+      }
+    }
 }
 
 bool CWriter::runOnModule(Module &M) {
@@ -3257,19 +3287,22 @@ std::string CWriter::GetValueName(Value *Operand, bool isDeclaration) {
   }
 
   if(!Operand) return "";
-  if(IV2Name.find(Operand) != IV2Name.end())
+  if(IV2Name.find(Operand) != IV2Name.end()){
+    if(isDeclaration){
+      errs() << "SUSAN: reconstructed variable counter increment for iv:" << IV2Name[Operand] << "\n";
+      cnt_reconstructedVariables++;
+    }
     return IV2Name[Operand];
+  }
   errs() << "SUSAN: getting value name for: " << *Operand << "\n";
   //SUSAN: variable names associated with phi will be replaced by phi
   if(TruncInst *inst = dyn_cast<TruncInst>(Operand))
     return GetValueName(inst->getOperand(0));
 
- // if(InstsToReplaceByPhi.find(Operand) != InstsToReplaceByPhi.end())
- //   return GetValueName(InstsToReplaceByPhi[Operand]);
-
   if(Instruction* inst = dyn_cast<Instruction>(Operand))
-    if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end())
+    if(deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
       return GetValueName(deleteAndReplaceInsts[inst]);
+    }
 
 
 
@@ -3345,6 +3378,10 @@ std::string CWriter::GetValueName(Value *Operand, bool isDeclaration) {
 /// instruction inline, with no destination provided.
 void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
   if(deleteAndReplaceInsts.find(&I) != deleteAndReplaceInsts.end()){
+    if(deleteAndReplaceInsts[&I]->getName() == "stderr"){
+      Out << " stderr ";
+      return;
+    }
     writeOperandInternal(deleteAndReplaceInsts[&I]);
     return;
   }
@@ -3377,6 +3414,14 @@ void CWriter::writeInstComputationInline(Instruction &I, bool startExpression) {
 
 void CWriter::writeOperandInternal(Value *Operand,
                                    enum OperandContext Context, bool startExpression) {
+  if(PHINode *phi = dyn_cast<PHINode>(Operand)){
+    if(LoadInst* ld = dyn_cast<LoadInst>(phi->getIncomingValue(0)))
+      if(ld->getPointerOperand()->getName() == "stderr"){
+        Out << "stderr";
+        return;
+      }
+  }
+
   if(inlinedArgNames.find(Operand) != inlinedArgNames.end()){
     errs() << "SUSAN: returning inlined name 3339: " << inlinedArgNames[Operand];
     if(valuesCast2Double.find(Operand) != valuesCast2Double.end())
@@ -3389,6 +3434,10 @@ void CWriter::writeOperandInternal(Value *Operand,
 
   Instruction *inst = dyn_cast<Instruction>(Operand);
   if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
+    if(deleteAndReplaceInsts[inst]->getName() == "stderr"){
+      Out << " stderr ";
+      return;
+    }
     writeOperandInternal(deleteAndReplaceInsts[inst]);
     return;
   }
@@ -3462,6 +3511,11 @@ void CWriter::writeOperandInternal(Value *Operand,
 }
 
 void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool startExpression) {
+  if(LoadInst* ld = dyn_cast<LoadInst>(Operand))
+    if(ld->getPointerOperand()->getName() == "stderr"){
+      Out << "stderr";
+      return;
+    }
   /*if(PHINode *phi = dyn_cast<PHINode>(Operand)){
     if(phis2print.find(phi) != phis2print.end()){
       writeOperand(phis2print[phi]);
@@ -3482,6 +3536,10 @@ void CWriter::writeOperand(Value *Operand, enum OperandContext Context, bool sta
 
   Instruction *inst = dyn_cast<Instruction>(Operand);
   if(inst && deleteAndReplaceInsts.find(inst) != deleteAndReplaceInsts.end()){
+    if(deleteAndReplaceInsts[inst]->getName() == "stderr"){
+      Out << " stderr ";
+      return;
+    }
     writeOperand(deleteAndReplaceInsts[inst]);
     return;
   }
@@ -5998,8 +6056,9 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
                                    std::set<std::string> &declaredLocals){
 
    if (AllocaInst *AI = isDirectAlloca(I)) {
-     auto varName = GetValueName(AI, true);
+     auto varName = GetValueName(AI);
      if(declaredLocals.find(varName) != declaredLocals.end()) return;
+     varName = GetValueName(AI, true);
      declaredLocals.insert(varName);
      errs() << "SUSAN: declaring varName 5264: " << varName << "\n";
 
@@ -6058,8 +6117,8 @@ void CWriter::DeclareLocalVariable(Instruction *I, bool &PrintedVar, bool &isDec
     for(auto local : declaredLocals)
       errs() << local << "\n";
      if (!canDeclareLocalLate(*I) && isNotDuplicatedDeclaration(I, false)) {
-       auto varName = GetValueName(I, true);
        if(declaredLocals.find(varName) != declaredLocals.end()) return;
+       auto varName = GetValueName(I, true);
        declaredLocals.insert(varName);
 
         errs() << "SUSAN: inst at 5950: " << *I << "\n";
@@ -6703,9 +6762,10 @@ void CWriter::printInstruction(Instruction *I, bool printSemiColon){
     Out << "  ";
     if (!isEmptyType(I->getType()) && !isInlineAsm(*I)) {
       if (canDeclareLocalLate(*I)) {
+        auto varName = GetValueName(&*I , true);
         printTypeName(Out, I->getType(), false) << ' ';
       }
-      Out << GetValueName(&*I, true) << " = ";
+      Out << GetValueName(&*I) << " = ";
     }
     writeInstComputationInline(*I);
 
@@ -7189,7 +7249,7 @@ void CWriter::printLoopNew(Loop *L) {
     Out << "uint64_t ";
 
     errs() << "SUSAN: printing IV" << *LP->IV << "\n";
-    Out << GetValueName(LP->IV) << " = ";
+    Out << GetValueName(LP->IV, true) << " = ";
     writeOperandInternal(LP->lb);
     Out << "; ";
 
@@ -7214,7 +7274,9 @@ void CWriter::printLoopNew(Loop *L) {
 
       Out << GetValueName(condInst->getOperand(0));
       if(ICmpInst *icmp = dyn_cast<ICmpInst>(condInst)){
-        if(!negateCondition && icmp->getPredicate() == ICmpInst::ICMP_NE)
+        if(!negateCondition && (icmp->getPredicate() == ICmpInst::ICMP_NE))
+          Out << " < ";
+        else if(negateCondition && (icmp->getPredicate() == ICmpInst::ICMP_EQ))
           Out << " < ";
         else printCmpOperator(icmp, negateCondition);
       }
@@ -9204,6 +9266,7 @@ bool CWriter::RunAllAnalysis(Function &F){
   preprocessIVIncrements();
   preprocessInsts2AddParenthesis(F);
   buildIVNames();
+  collectNotInlinableBinOps(F);
 
    return Modified;
 }
