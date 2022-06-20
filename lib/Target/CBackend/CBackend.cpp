@@ -4232,7 +4232,13 @@ void CWriter::findOMPFunctions(Module &M){
     int numArgs = std::distance(utask->arg_begin(), utask->arg_end())-2;
     for(auto idx = 3; idx < numArgs+3; ++idx) {
       Value *argInput = callInst->getArgOperand(idx);
+      Value *arg = utask->getArg(idx-1);
+      PointerType* ty = dyn_cast<PointerType>(arg->getType());
+      if(ty)
+        type2declare[argInput] = ty->getPointerElementType();
+
       errs() << "SUSAN: argInput 4158: " << *argInput << "\n";
+      errs() << "SUSAN: arg 4158: " << *arg << "\n";
       PointerType* ptrTy = dyn_cast<PointerType>(argInput->getType());
       if(ptrTy && isa<StructType>(ptrTy->getPointerElementType())){
         for(auto U : argInput->users()){
@@ -4260,6 +4266,12 @@ void CWriter::findOMPFunctions(Module &M){
             }
           }
         }
+      } else {
+          if(auto alloca = isDirectAlloca(argInput))
+            for(auto user : alloca->users())
+              if(StoreInst *store = dyn_cast<StoreInst>(user))
+                if(store->getPointerOperand() == alloca)
+                  deadInsts.insert(store);
       }
     }
   }
@@ -7472,7 +7484,13 @@ if( NATURAL_CONTROL_FLOW ){
         if(declaredLocals.find(varName) == declaredLocals.end()
           && omp_declaredLocals.find(varName) == omp_declaredLocals.end()){
           auto varName = GetValueName(&*II, true);
-          printTypeName(Out, II->getType(), false) << ' ';
+          auto typeName = II->getType();
+          for(auto [argInput, type] : type2declare){
+            auto argInputName = GetValueName(argInput);
+            if(argInputName == varName)
+              typeName = type;
+          }
+          printTypeName(Out, typeName, false) << ' ';
           errs() << "SUSAN: printing varname 7310: " << varName << "\n";
           if(!IS_OPENMP_FUNCTION)
             declaredLocals.insert(varName);
@@ -9376,7 +9394,8 @@ void CWriter::inlineNameForArg(Value* argInput, Value* arg){
   }
   else if(ConstantFP* constant = dyn_cast<ConstantFP>(argInput)){
     inlinedArgNames[arg] = ftostr(constant->getValueAPF()) ;
-  } else if(declaredLocals.find(argName) == declaredLocals.end()){
+  }
+  else if(declaredLocals.find(argName) == declaredLocals.end()){
       if(Instruction *argInputInst = dyn_cast<Instruction>(argInput)){
           if(!isa<CastInst>(argInputInst)){
             errs() << "SUSAN: inlining argInput: " << *argInput << "\n";
@@ -9446,7 +9465,13 @@ void CWriter::visitCallInst(CallInst &I) {
               inlineNameForArg(argInput, arg);
             }
         } else {
-            inlineNameForArg(argInput, arg);
+          if(auto alloca = isDirectAlloca(argInput))
+            for(auto user : alloca->users())
+              if(StoreInst *store = dyn_cast<StoreInst>(user))
+                if(store->getPointerOperand() == alloca)
+                  argInput = store->getOperand(0);
+          errs() << "SUSAN: argInput updated:" << *argInput << "\n";
+          inlineNameForArg(argInput, arg);
         }
       }
 

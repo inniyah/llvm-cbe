@@ -144,6 +144,7 @@ class CWriter : public ModulePass, public InstVisitor<CWriter> {
   std::set<std::string> omp_declaredLocals;
   std::map<Value*, std::string> IV2Name;
   std::set<Instruction*> notInlinableBinOps;
+  std::map<Value*, Type*> type2declare;
 
   CBERegion *topRegion;
 
