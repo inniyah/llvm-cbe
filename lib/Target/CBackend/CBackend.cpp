@@ -7193,7 +7193,7 @@ void CWriter::printLoopNew(Loop *L) {
         printInstruction(I);
       }*/
 
-      Out << "#pragma omp for";
+      Out << "#pragma omp for schedule(static)";
 
       //find if there are private variables
       bool printPrivate = true;
