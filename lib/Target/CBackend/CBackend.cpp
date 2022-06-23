@@ -9424,6 +9424,7 @@ void CWriter::visitCallInst(CallInst &I) {
    * OpenMP: skip omp runtime call
    */
   if(ompFuncs.find(&I) != ompFuncs.end()){
+      Out << "//START OUTLINED\n";
       Out << "  #pragma omp parallel \n" << "{\n";
       // Create a Call to omp_outlined
       auto utask = ompFuncs[&I];
@@ -9590,6 +9591,7 @@ void CWriter::visitCallInst(CallInst &I) {
       //toDeclareLocal = toDeclareLocal_s;
 
       Out << "}\n";
+      Out << "//END OUTLINED\n";
       return;
   }
 
