@@ -1010,7 +1010,7 @@ Value* CWriter::findOriginalUb(Function &F, Value *ub, CallInst *initCI, CallIns
         }
       }
   }
-  errs() << "SUSAN: ub: " << *ub << "\n";
+  //errs() << "SUSAN: ub: " << *ub << "\n";
   return ub;
 }
 
@@ -1233,7 +1233,7 @@ void CWriter::preprocessLoopProfiles(Function &F){
     if(!LP->isForLoop) continue;
     errs() << "Loop: " << *LP->L << "\n";
     errs() << "isomp: " << LP->isOmpLoop << "\n";
-    errs() << "ub: " << *LP->ub << "\n";
+    //errs() << "ub: " << *LP->ub << "\n";
   }
 
 
@@ -5605,7 +5605,7 @@ void CWriter::markGotoBranches(Function &F){
           if(!isPureBranchBB(&BB)){
             errs() << "found goto branch:" << *br << "\n";
             errs() << "from BB " << BB << "\n";
-            gotoBranches.insert(br);
+            //gotoBranches.insert(br);
           }
         }
       }
@@ -5616,7 +5616,7 @@ void CWriter::markGotoBranches(Function &F){
     for(auto br : gotoBranches){
       for (auto succ = succ_begin(br); succ != succ_end(br); ++succ){
 	      BasicBlock *succBB = *succ;
-        printLabels.insert(succBB);
+        //printLabels.insert(succBB);
       }
     }
 
@@ -6687,7 +6687,17 @@ void CWriter::printFunction(Function &F, bool inlineF) {
         //else{
           errs() << "SUSAN: br:" << *br << "\n";
           BasicBlock *succ0 = br->getSuccessor(0);
-          if(R && !nodeBelongsToRegion(succ0, R)) continue;
+          BasicBlock *succOne = nullptr;
+          if(br->isConditional()){
+            succOne = br->getSuccessor(1);
+          }
+          if(succOne){
+            Loop* L = LI->getLoopFor(succOne);
+            if(!(L && L->getLoopLatch() == succOne))
+              if(R && !nodeBelongsToRegion(succ0, R)) continue;
+          }
+          if(!succOne && R && !nodeBelongsToRegion(succ0, R)) continue;
+          errs() << "print succ0 :" << *succ0 << "\n";
 		      if(visited.find(succ0)==visited.end()){
             toVisit.push(succ0);
             visited.insert(succ0);
@@ -7251,9 +7261,9 @@ void CWriter::printLoopNew(Loop *L) {
     Value *initVal, *ub, *incr;
     errs() << "SUSAN: found for loop profile:\n";
     errs() << "lb: " << *LP->lb << "\n";
-    if(LP->ub)
-      errs() << "ub: " << *LP->ub << "\n";
-    errs() << "incr: " << *LP->incr << "\n";
+    //if(LP->ub)
+    //  errs() << "ub: " << *LP->ub << "\n";
+    //errs() << "incr: " << *LP->incr << "\n";
 
     //print init statement
 
