@@ -1704,7 +1704,8 @@ void CWriter::findDoubleGEP(Function &F){
           errs() << "SUSAN: gep 1704: " << *gep << "\n";
           errs() << "SUSAN: gep2 1705: " << *gep2 << "\n";
           if(!isa<GetElementPtrInst>(gep2->getPointerOperand()) &&
-              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()))
+              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()) &&
+              (inlinedArgNames.find(gep2->getPointerOperand()) == inlinedArgNames.end()))
             doubleGeps.insert(ld);
         }
       }
@@ -1718,7 +1719,8 @@ void CWriter::findDoubleGEP(Function &F){
           errs() << "SUSAN: gep 1715: " << *gep << "\n";
           errs() << "SUSAN: gep2 1716: " << *gep2 << "\n";
           if(!isa<GetElementPtrInst>(gep2->getPointerOperand()) &&
-              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()))
+              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()) &&
+              (inlinedArgNames.find(gep2->getPointerOperand()) == inlinedArgNames.end()))
             doubleGeps.insert(st);
         }
       }
