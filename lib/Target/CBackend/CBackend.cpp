@@ -1689,6 +1689,43 @@ void CWriter::collectNotInlinableBinOps(Function &F){
     }
 }
 
+void CWriter::findDoubleGEP(Function &F){
+  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I){
+    LoadInst *ld = dyn_cast<LoadInst>(&*I);
+    StoreInst *st = dyn_cast<StoreInst>(&*I);
+    if(!ld && !st) continue;
+    if(ld){
+      if(GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(ld->getPointerOperand())){
+        auto indices = gep->getNumIndices();
+        if(GetElementPtrInst* gep2 = dyn_cast<GetElementPtrInst>(gep->getPointerOperand())){
+          auto indices2 = gep2->getNumIndices();
+          if(indices == indices2 && indices == 1)
+            errs() << "SUSAN: found double gep: 1703: " << *ld << "\n";
+          errs() << "SUSAN: gep 1704: " << *gep << "\n";
+          errs() << "SUSAN: gep2 1705: " << *gep2 << "\n";
+          if(!isa<GetElementPtrInst>(gep2->getPointerOperand()) &&
+              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()))
+            doubleGeps.insert(ld);
+        }
+      }
+    } else{
+      if(GetElementPtrInst* gep = dyn_cast<GetElementPtrInst>(st->getPointerOperand())){
+        auto indices = gep->getNumIndices();
+        if(GetElementPtrInst* gep2 = dyn_cast<GetElementPtrInst>(gep->getPointerOperand())){
+          auto indices2 = gep2->getNumIndices();
+          if(indices == indices2 && indices == 1)
+            errs() << "SUSAN: found double gep: 1713: " << *st << "\n";
+          errs() << "SUSAN: gep 1715: " << *gep << "\n";
+          errs() << "SUSAN: gep2 1716: " << *gep2 << "\n";
+          if(!isa<GetElementPtrInst>(gep2->getPointerOperand()) &&
+              (valuesCast2Double.find(gep2->getPointerOperand()) == valuesCast2Double.end()))
+            doubleGeps.insert(st);
+        }
+      }
+    }
+  }
+}
+
 bool CWriter::runOnModule(Module &M) {
   cnt_totalVariables = 0;
   cnt_reconstructedVariables = 0;
@@ -9551,6 +9588,7 @@ void CWriter::visitCallInst(CallInst &I) {
       //inline the function
       IS_OPENMP_FUNCTION = true;
       RunAllAnalysis(*utask);
+      findDoubleGEP(*utask);
       // Output all floating point constants that cannot be printed accurately.
       printFloatingPointConstants(*utask);
       printFunction(*utask, true);
@@ -10685,6 +10723,31 @@ void CWriter::visitLoadInst(LoadInst &I) {
   errs() << "SUSAN: curinstr before loadinst: " << *CurInstr << "\n";
   CurInstr = &I;
   errs() << "SUSAN: loadInst: " << I << "\n";
+
+  if(doubleGeps.find(&I) != doubleGeps.end()){
+    GetElementPtrInst *gep = cast<GetElementPtrInst>(I.getPointerOperand());
+    GetElementPtrInst *gep2 = cast<GetElementPtrInst>(gep->getPointerOperand());
+    auto ptrVal = gep2->getPointerOperand();
+
+    writeOperand(ptrVal);
+
+    auto firstIdx = gep->getOperand(1);
+    Out << "[";
+    if(ConstantInt *idx = dyn_cast<ConstantInt>(firstIdx))
+      Out << idx->getSExtValue();
+   else
+      writeOperand(firstIdx);
+
+    auto secondIdx = gep2->getOperand(1);
+    Out << "+";
+    if(ConstantInt *idx = dyn_cast<ConstantInt>(secondIdx))
+      Out << idx->getSExtValue();
+   else
+      writeOperand(secondIdx);
+
+   Out << "]";
+   return;
+  }
   // for omp inlining struct
   if(inlinedArgNames.find(&I) != inlinedArgNames.end()){
     Out << inlinedArgNames[&I];
@@ -10709,8 +10772,32 @@ void CWriter::visitLoadInst(LoadInst &I) {
 void CWriter::visitStoreInst(StoreInst &I) {
   CurInstr = &I;
 
+  if(doubleGeps.find(&I) != doubleGeps.end()){
+    GetElementPtrInst *gep = cast<GetElementPtrInst>(I.getPointerOperand());
+    GetElementPtrInst *gep2 = cast<GetElementPtrInst>(gep->getPointerOperand());
+    auto ptrVal = gep2->getPointerOperand();
+    Out << GetValueName(ptrVal);
+    auto firstIdx = gep->getOperand(1);
+    Out << "[";
+    if(ConstantInt *idx = dyn_cast<ConstantInt>(firstIdx))
+      Out << idx->getSExtValue();
+   else
+      Out << GetValueName(firstIdx);
+
+    auto secondIdx = gep2->getOperand(1);
+    Out << "+";
+    if(ConstantInt *idx = dyn_cast<ConstantInt>(secondIdx))
+      Out << idx->getSExtValue();
+   else
+      Out << GetValueName(firstIdx);
+
+   Out << "]";
+  }
+  else{
+
   writeMemoryAccess(I.getPointerOperand(), I.getOperand(0)->getType(),
                     I.isVolatile(), I.getAlignment());
+  }
   Out << " = ";
   Value *Operand = I.getOperand(0);
   unsigned BitMask = 0;
