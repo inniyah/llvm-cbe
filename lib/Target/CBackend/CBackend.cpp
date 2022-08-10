@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -33,6 +34,7 @@
 
 // SUSAN: added libs
 #include <queue>
+#include <stack>
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
